@@ -1,0 +1,25 @@
+name: Bug report
+description: Something broke in the agent loop, a tool, or the gateway
+labels: [bug]
+body:
+  - type: input
+    id: stage
+    attributes:
+      label: Affected stage
+      placeholder: e.g. Stage 2 Tool Registry
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      placeholder: |
+        pytest path/to/test.py -v
+        Expected vs actual output
+    validations:
+      required: true
+  - type: textarea
+    id: trace
+    attributes:
+      label: Trace (if available)
+      description: Paste the Tracer events planner → tool → reflection

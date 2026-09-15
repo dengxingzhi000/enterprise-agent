@@ -1,0 +1,24 @@
+name: Feature request
+description: New stage, tool, scenario, or framework migration
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      placeholder: e.g. pgvector-backed retrieval to replace KnowledgeStore
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Design sketch
+      placeholder: Files to touch, Tool/Policy impact, Eval additions
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: TDD plan
+      options:
+        - label: Failing test first (RED)
+        - label: Minimal implementation (GREEN)
+        - label: Eval/Trace updated if behavior changes
