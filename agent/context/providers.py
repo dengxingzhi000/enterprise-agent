@@ -13,7 +13,7 @@ class BaseProvider:
     def compress(self, segs: list[dict], keep_recent: int) -> tuple[list[dict], dict | None]:
         if keep_recent <= 0 or keep_recent >= len(segs):
             return segs, None
-        kept = segs[-keep_recent:]
+        kept = [dict(s) for s in segs[-keep_recent:]]
         old_text = "\n".join(s.get("text", "") for s in segs[:-keep_recent])
         from .extract import extract
         return kept, {"name": f"{self.name}:summary", "priority": self.priority,

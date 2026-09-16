@@ -49,3 +49,36 @@ def test_provider_compress_keeps_recent_and_summarizes_old():
     assert summary["name"] == "observation:summary"
     assert "…" in summary["text"]  # extract() joins head/keywords/tail with "…"
     assert len(state["observations"]) == 20  # 原言保留
+
+
+def test_provider_compress_kept_segments_are_copies():
+    from agent.context.providers import ObservationProvider
+    segs = [{"name": "observation[{}]".format(i), "priority": 20, "text": f"orig-{i}"}
+            for i in range(3)]
+    p = ObservationProvider()
+    kept, summary = p.compress(segs, keep_recent=1)
+    assert len(kept) == 1
+    kept[0]["text"] = "MUTATED"
+    kept[0]["priority"] = 999
+    kept[0]["name"] = "changed"
+    assert segs[-1]["text"] == "orig-2", "source seg must not be mutated by aliasing"
+    assert segs[-1]["priority"] == 20
+    assert segs[-1]["name"] == "observation[2]"
+
+
+def test_provider_compress_zero_keeps_all():
+    from agent.context.providers import ObservationProvider
+    segs = [{"name": f"s{i}", "priority": 20, "text": f"t{i}"} for i in range(4)]
+    p = ObservationProvider()
+    kept, summary = p.compress(segs, keep_recent=0)
+    assert kept is segs
+    assert summary is None
+
+
+def test_provider_compress_overflow_keeps_all():
+    from agent.context.providers import ObservationProvider
+    segs = [{"name": f"s{i}", "priority": 20, "text": f"t{i}"} for i in range(4)]
+    p = ObservationProvider()
+    kept, summary = p.compress(segs, keep_recent=len(segs))
+    assert kept is segs
+    assert summary is None
