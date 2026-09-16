@@ -31,12 +31,14 @@ SCHEMA_DDL: list[str] = [
         body JSONB NOT NULL,
         created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
     )""",
+    """CREATE INDEX IF NOT EXISTS idx_memory_task_tenant ON memory_task(tenant_id)""",
     """CREATE TABLE IF NOT EXISTS memory_episodic (
         id BIGSERIAL PRIMARY KEY, tenant_id TEXT NOT NULL, department TEXT,
         permission TEXT NOT NULL DEFAULT 'public', version INT NOT NULL DEFAULT 1,
         body JSONB NOT NULL,
         created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
     )""",
+    """CREATE INDEX IF NOT EXISTS idx_memory_episodic_tenant ON memory_episodic(tenant_id)""",
 ]
 
 
