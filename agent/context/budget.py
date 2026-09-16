@@ -11,6 +11,11 @@ class TokenBudget:
         return max(0, self.total - self.reserved)
 
     def check(self, segments: list[dict]) -> tuple[bool, int, list[dict]]:
+        """检查分段是否在预算内，按优先级从低到高丢弃。
+
+        返回 (fits, usage, dropped)：usage 为丢弃前（PRE-drop）总量；
+        调用方用 dropped 段名过滤原 segments 即得 kept。
+        """
         usage = sum(s.get("tokens", 0) for s in segments)
         if usage <= self.available:
             return True, usage, []
