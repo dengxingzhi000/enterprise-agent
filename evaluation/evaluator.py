@@ -26,8 +26,9 @@ def evaluate_expense_cases(cases: list[dict], policy_threshold: float = 5000) ->
 
 
 def context_quality_gate(baseline: dict, managed: dict, max_ratio: float = 0.7) -> dict:
-    b_use, m_use = baseline.get("usage", 0) or 1, managed.get("usage", 0)
+    b_use, m_use = baseline.get("usage", 0) or 1, managed.get("usage") or 0
     ratio = m_use / b_use
-    ok = managed.get("decision") == baseline.get("decision") and ratio <= max_ratio
+    decision_match = baseline.get("decision") is not None and managed.get("decision") == baseline.get("decision")
+    ok = decision_match and ratio <= max_ratio
     return {"pass": ok, "usage_ratio": ratio,
-            "decision_match": managed.get("decision") == baseline.get("decision")}
+            "decision_match": decision_match}

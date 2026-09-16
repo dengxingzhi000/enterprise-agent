@@ -233,6 +233,8 @@ def test_loop_with_assembler_bounded_and_answer_preserved():
     asm = ContextAssembler(budget=TokenBudget(total=1200, reserved_for_output=200))
     s2 = run(AgentState(task="查500"), planner=planner, executor=executor, assembler=asm, max_iterations=20)
     assert s1.answer == s2.answer == "根因：网关超时"
+    assert "context_report" in s2.context
+    assert s2.context["context_report"]["usage"] <= 1200
     _, report = asm.assemble({"task": s2.task, "messages": s2.messages,
                               "observations": s2.observations, "tool_calls": s2.tool_calls})
     assert report["usage"] <= 1200
@@ -244,3 +246,9 @@ def test_quality_gate_baseline_vs_managed():
                                managed={"decision": "human_review", "usage": 6000})
     assert out["pass"] is True
     assert out["usage_ratio"] == 0.6
+    mismatch = context_quality_gate(baseline={"decision": "a", "usage": 100},
+                                    managed={"decision": "b", "usage": 50})
+    assert mismatch["pass"] is False
+    boundary = context_quality_gate(baseline={"decision": "a", "usage": 100},
+                                    managed={"decision": "a", "usage": 70})
+    assert boundary["pass"] is True

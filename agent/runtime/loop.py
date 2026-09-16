@@ -1,7 +1,12 @@
 """Agent Loop: Task → Planner → Executor → Observation → Reflection → ... → Final"""
+import dataclasses
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from .state import AgentState
 from .planner import default_planner, default_executor
+
+if TYPE_CHECKING:
+    from agent.context.assembler import ContextAssembler
 
 
 def run(
@@ -9,9 +14,8 @@ def run(
     planner: Callable = default_planner,
     executor: Callable = default_executor,
     max_iterations: int = 8,
-    assembler=None,
+    assembler: "ContextAssembler | None" = None,
 ) -> AgentState:
-    import dataclasses
     state.status = "running"
     while state.iteration < max_iterations:
         planner_state = state
@@ -22,9 +26,13 @@ def run(
                      "observations": state.observations, "tool_calls": state.tool_calls,
                      "rag": state.context.get("rag", []), "system": state.context.get("system", "")})
                 state.context["context_report"] = report
+                # planner view is read-only by contract; collections copied defensively
                 planner_state = dataclasses.replace(
                     state, messages=[{"role": m.get("role", "user"), "content": m.get("content", "")}
-                                     for m in llm_messages])
+                                     for m in llm_messages],
+                    observations=list(state.observations),
+                    tool_calls=list(state.tool_calls),
+                    context=dict(state.context))
             except Exception:  # noqa: BLE001 - 组装失败退化现状
                 planner_state = state
         plan = planner(planner_state)
