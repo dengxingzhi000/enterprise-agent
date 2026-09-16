@@ -22,6 +22,8 @@ class _SaverAdapter:
 
 
 def get_checkpointer(dsn: str | None = None):
+    import os
+    dsn = dsn or os.environ.get("PG_DSN") or os.environ.get("POSTGRES_DSN")
     if dsn:
         try:
             from langgraph.checkpoint.postgres import PostgresSaver  # type: ignore
