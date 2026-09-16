@@ -6,3 +6,4 @@ from .connector import (  # noqa: F401
     PGConnector,
     get_connector,
 )
+from .schema import ensure_schema  # noqa: F401
