@@ -36,19 +36,18 @@ class ContextAssembler:
                 by_layer.setdefault(s["name"].split("[")[0].split(":")[0], []).append(s)
             layer_keep = {"conversation": self.conv_keep, "observation": self.obs_keep}
             new_segs: list[dict] = []
-            for s in segs:
-                layer = s["name"].split("[")[0].split(":")[0]
-                if layer not in layer_keep or len(by_layer[layer]) <= layer_keep[layer]:
-                    new_segs.append(s)
+            for layer, layer_segs in by_layer.items():
+                if layer not in layer_keep or len(layer_segs) <= layer_keep[layer]:
+                    new_segs.extend(layer_segs)
                     continue
                 target_provider = next((p for p in self.providers if p.name == layer), None)
                 if target_provider is None:
-                    new_segs.append(s)
+                    new_segs.extend(layer_segs)
                     continue
                 try:
-                    kept, summary = target_provider.compress(by_layer[layer], layer_keep[layer])
+                    kept, summary = target_provider.compress(layer_segs, layer_keep[layer])
                     if summary is None:
-                        new_segs.append(s)
+                        new_segs.extend(layer_segs)
                         continue
                     summary = dict(summary)
                     summary["tokens"] = self.counter.count(summary.get("text", ""))
@@ -57,11 +56,12 @@ class ContextAssembler:
                     for k in kept:
                         k = dict(k); k["idx"] = len(new_segs); new_segs.append(k)
                     compressed.append({"provider": layer,
-                                       "before": len(by_layer[layer]),
+                                       "before": len(layer_segs),
                                        "after": 1 + len(kept),
                                        "kept": len(kept)})
                 except Exception:
                     skipped.append(target_provider.name)
+                    new_segs.extend(layer_segs)
             segs = new_segs
         fits, usage, dropped = self.budget.check(segs)
         # 极端兜底：system/task 永不丢弃（即使仍超预算，后续靠截断收敛）

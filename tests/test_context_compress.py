@@ -97,3 +97,45 @@ def test_assembler_compresses_when_over_trigger_ratio():
     assert report["usage"] <= 800
     providers = {c["provider"] for c in report.get("compressed", [])}
     assert "observation" in providers or "conversation" in providers
+
+
+def test_assembler_compresses_per_layer_not_per_seg():
+    """B1 regression: compression must run once per layer, not once per segment.
+
+    With 20 observation segments and obs_keep=5, the assembler should produce
+    exactly ONE compressed[] entry (before=20, kept=5, after=6) and emit
+    exactly one summary segment — not duplicate the work 20 times.
+    """
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    from agent.context.providers import (
+        DEFAULT_PROVIDERS, ObservationProvider,
+    )
+    big = "ERROR trace " * 50
+    state = {"task": "查500", "system": "你是助手。",
+             "messages": [{"role": "user", "content": f"msg-{i}"} for i in range(20)],
+             "observations": [{"tool": "logs.tail", "result": big} for _ in range(20)]}
+    # Ensure all 20 observations reach the assembler (default recent=10 truncates).
+    providers = [p if p.name != "observation"
+                 else ObservationProvider(recent=20)
+                 for p in DEFAULT_PROVIDERS]
+    asm = ContextAssembler(budget=TokenBudget(total=800, reserved_for_output=100),
+                           providers=providers,
+                           trigger_ratio=0.5,
+                           observation_keep_recent=5)
+    msgs, report = asm.assemble(state)
+    obs_entries = [c for c in report["compressed"] if c["provider"] == "observation"]
+    assert len(obs_entries) == 1, (
+        f"expected exactly 1 observation compressed[] entry, got "
+        f"{len(obs_entries)}: {obs_entries}"
+    )
+    entry = obs_entries[0]
+    assert entry["before"] == 20
+    assert entry["kept"] == 5
+    # 'after' shape = 1 summary + kept copies; proves exactly one summary was emitted.
+    assert entry["after"] == 1 + entry["kept"]
+    # Output msgs must include the summary's head text (extract() head segment).
+    summary_seen = any("logs" in m["content"] and "summary" not in m["content"]
+                       and "ERROR" in m["content"]
+                       for m in msgs)
+    assert summary_seen, f"expected summary head in msgs, got: {[m['content'][:40] for m in msgs]}"
