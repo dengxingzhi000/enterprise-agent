@@ -49,3 +49,49 @@ def test_parity_still_holds_with_durable_graph():
         classic = run_expense_workflow(expense, policy_threshold=5000)["decision"]
         via = g.invoke({"expense": expense}, config={"configurable": {"thread_id": "parity-1"}})["decision"]
         assert classic == expected == via
+
+
+def test_saver_adapter_delegates_to_native():
+    from workflow.checkpoint import _SaverAdapter
+
+    class FakeNative:
+        def __init__(self):
+            self.put_calls = []
+            self.get_calls = []
+            self._data = {}
+
+        def put(self, config, checkpoint, metadata=None, new_versions=None):
+            self.put_calls.append((config, checkpoint))
+            tid = config["configurable"]["thread_id"]
+            self._data[tid] = dict(checkpoint)
+
+        def get_tuple(self, config):
+            self.get_calls.append(config)
+            tid = config["configurable"]["thread_id"]
+            v = self._data.get(tid)
+            return dict(v) if v is not None else None
+
+    fake = FakeNative()
+    adapter = _SaverAdapter(fake)
+    adapter.put("t-native-1", {"node": "judge"})
+    assert fake.put_calls, "native put must be called on delegation"
+    assert fake.put_calls[0][0]["configurable"]["thread_id"] == "t-native-1"
+    out = adapter.get("t-native-1")
+    assert fake.get_calls, "native get_tuple must be called on delegation"
+    assert out["node"] == "judge"
+
+
+def test_pause_creates_approval_pending_entry_and_resume():
+    from workflow.graph_lang import build_expense_graph
+    from workflow.checkpoint import get_checkpointer
+    from security.approval import ApprovalStore
+    approvals = ApprovalStore()
+    cp = get_checkpointer(dsn=None)
+    g = build_expense_graph(policy_threshold=5000, checkpointer=cp, approval_store=approvals)
+    first = g.invoke({"expense": {"id": "E9b", "amount": 6230}},
+                     config={"configurable": {"thread_id": "task-apr-1"}})
+    assert first["decision"] in ("paused_human_review", "human_review")
+    pendings = [v for v in approvals._items.values() if v["status"] == "pending"]
+    assert len(pendings) >= 1, "pause must dual-write ApprovalStore pending entry"
+    done = g.invoke(None, config={"configurable": {"thread_id": "task-apr-1"}})
+    assert done["decision"] == "human_review"
