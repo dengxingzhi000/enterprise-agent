@@ -109,7 +109,7 @@ def test_assembler_compresses_per_layer_not_per_seg():
     from agent.context.assembler import ContextAssembler
     from agent.context.budget import TokenBudget
     from agent.context.providers import (
-        DEFAULT_PROVIDERS, ObservationProvider,
+        get_default_providers, ObservationProvider,
     )
     big = "ERROR trace " * 50
     state = {"task": "查500", "system": "你是助手。",
@@ -118,7 +118,7 @@ def test_assembler_compresses_per_layer_not_per_seg():
     # Ensure all 20 observations reach the assembler (default recent=10 truncates).
     providers = [p if p.name != "observation"
                  else ObservationProvider(recent=20)
-                 for p in DEFAULT_PROVIDERS]
+                 for p in get_default_providers()]
     asm = ContextAssembler(budget=TokenBudget(total=800, reserved_for_output=100),
                            providers=providers,
                            trigger_ratio=0.5,

@@ -1,4 +1,4 @@
-"""tests/test_memory_pg.py: Task 1 + Task 2 + Task 3 - connector + schema + MemoryStore."""
+"""tests/test_memory_pg.py: Task 1 + Task 2 + Task 3 + Task 4 - connector + schema + MemoryStore + MemoryProviders."""
 
 
 def test_inmemory_connector_crud_and_healthcheck():
@@ -62,3 +62,46 @@ def test_memory_store_put_warns_on_outage():
         s.put("user", "tenant_a", {"x": 1})
     assert any("memory put outage" in str(w.message) and "user" in str(w.message)
                for w in captured), f"no outage warning captured, got: {[str(w.message) for w in captured]}"
+
+
+def test_memory_providers_collect_from_store_and_format(monkeypatch):
+    import infrastructure.pg.connector as conn_mod
+    from infrastructure.pg.connector import InMemoryConnector
+    from agent.memory.store import MemoryStore
+    from agent.context.memory_providers import (ConvMemoryProvider, UserMemoryProvider,
+                                                  OrgMemoryProvider, EpisodicMemoryProvider)
+    c = InMemoryConnector()
+    monkeypatch.setattr(conn_mod, "get_connector", lambda: c)
+    for t in ("memory_conv", "memory_user", "memory_org"):
+        c.execute(f"CREATE TABLE {t} (id INT, tenant_id TEXT, permission TEXT, body TEXT)")
+    s = MemoryStore(c)
+    s.put("conv", "t1", {"role": "user", "content": "hi"}, permission="tenant")
+    s.put("user", "t1", {"name": "alice", "role": "ops"}, permission="tenant")
+    s.put("org", "t1", {"policy": "审批>5000走财务"}, permission="tenant")
+    state = {"tenant_id": "t1"}
+    conv_segs = ConvMemoryProvider(permission="tenant").collect(state)
+    user_segs = UserMemoryProvider(permission="tenant").collect(state)
+    org_segs = OrgMemoryProvider(permission="tenant").collect(state)
+    epi_segs = EpisodicMemoryProvider(permission="tenant").collect(state)
+    assert any("hi" in s["text"] for s in conv_segs)
+    assert any("alice" in s["text"] for s in user_segs)
+    assert any("审批" in s["text"] for s in org_segs)
+    assert epi_segs == []
+
+
+def test_memory_provider_outage_raises_memory_outage(monkeypatch):
+    from infrastructure.pg.connector import InMemoryConnector, OperationalError
+    from agent.memory.store import MemoryStore
+    from agent.context.memory_providers import ConvMemoryProvider, MemoryOutage
+    c = InMemoryConnector()
+    c.execute("CREATE TABLE memory_conv (id INT, tenant_id TEXT, permission TEXT, body TEXT)")
+    s = MemoryStore(c)
+    def boom(sql, params=()):
+        raise OperationalError("pg down")
+    monkeypatch.setattr(c, "execute", boom)
+    monkeypatch.setattr(c, "fetch_all", lambda sql, params=(): (_ for _ in ()).throw(OperationalError("pg down")))
+    p = ConvMemoryProvider(store=s, permission="tenant")
+    state = {"tenant_id": "t1"}
+    import pytest
+    with pytest.raises(MemoryOutage):
+        p.collect(state)

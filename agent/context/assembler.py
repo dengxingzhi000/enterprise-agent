@@ -1,7 +1,7 @@
 """agent/context/assembler.py"""
 from .budget import TokenBudget
 from .counter import get_counter
-from .providers import DEFAULT_PROVIDERS
+from .providers import get_default_providers
 
 
 class ContextAssembler:
@@ -10,7 +10,7 @@ class ContextAssembler:
                  conversation_keep_recent: int = 3,
                  observation_keep_recent: int = 5):
         self.budget = budget or TokenBudget()
-        self.providers = providers if providers is not None else DEFAULT_PROVIDERS
+        self.providers = providers if providers is not None else get_default_providers()
         self.counter = counter or get_counter()
         self.counter_used = type(self.counter).__name__.replace("Counter", "").lower()
         self.trigger_ratio = trigger_ratio
