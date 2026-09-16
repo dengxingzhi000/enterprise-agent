@@ -3,6 +3,7 @@
 LAYERS = ("user", "org", "conv", "task", "episodic")，对应五张 memory_<layer> 表。
 """
 import json
+import warnings
 
 from infrastructure.pg.connector import OperationalError
 
@@ -84,8 +85,8 @@ class MemoryStore:
                 f"VALUES (?, ?, ?, ?, ?)",
                 (tenant_id, department, permission, version, json.dumps(body)),
             )
-        except OperationalError:
-            pass
+        except OperationalError as e:
+            warnings.warn(f"memory put outage layer={layer}: {e}")
 
     def query(self, layer: str, tenant_id: str, permission: str = "public",
               department: str | None = None, limit: int = 10) -> list[dict]:
@@ -93,10 +94,18 @@ class MemoryStore:
             return []
         if layer not in self.LAYERS:
             raise ValueError(f"unknown layer: {layer}")
+        where_parts = ["tenant_id = ?", "permission = ?"]
+        params: list = [tenant_id, permission]
+        if department is not None:
+            where_parts.append("department = ?")
+            params.append(department)
+        params.append(limit)
         try:
             rows = self._c.fetch_all(
-                f"SELECT body, tenant_id, permission, department FROM memory_{layer}",
-                (),
+                f"SELECT body, tenant_id, permission, department FROM memory_{layer} "
+                f"WHERE {' AND '.join(where_parts)} "
+                f"ORDER BY updated_at DESC LIMIT ?",
+                tuple(params),
             )
         except OperationalError:
             return []

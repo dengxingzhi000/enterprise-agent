@@ -46,3 +46,19 @@ def test_memory_store_outage_degrades_silently(monkeypatch):
     monkeypatch.setattr(c, "execute", boom)
     s.put("user", "tenant_a", {"x": 1})  # 不抛
     assert s.query("user", "tenant_a", permission="public") == []
+
+
+def test_memory_store_put_warns_on_outage():
+    import warnings
+    from infrastructure.pg.connector import InMemoryConnector, OperationalError
+    from agent.memory.store import MemoryStore
+    c = InMemoryConnector()
+    s = MemoryStore(c)
+    def boom(sql, params=()):
+        raise OperationalError("pg down")
+    c.execute = boom  # 直接覆盖
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        s.put("user", "tenant_a", {"x": 1})
+    assert any("memory put outage" in str(w.message) and "user" in str(w.message)
+               for w in captured), f"no outage warning captured, got: {[str(w.message) for w in captured]}"
