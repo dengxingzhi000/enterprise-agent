@@ -1,4 +1,4 @@
-"""tests/test_memory_pg.py: Task 1 + Task 2 + Task 3 + Task 4 - connector + schema + MemoryStore + MemoryProviders."""
+"""tests/test_memory_pg.py: Task 1 + Task 2 + Task 3 + Task 4 + Task 5 - connector + schema + MemoryStore + MemoryProviders + loop wiring."""
 
 
 def test_inmemory_connector_crud_and_healthcheck():
@@ -105,3 +105,31 @@ def test_memory_provider_outage_raises_memory_outage(monkeypatch):
     import pytest
     with pytest.raises(MemoryOutage):
         p.collect(state)
+
+
+def test_loop_outage_skips_memory_layer_in_report(monkeypatch):
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    from infrastructure.pg.connector import InMemoryConnector, OperationalError
+    from agent.memory.store import MemoryStore
+    from agent.context.memory_providers import ConvMemoryProvider
+    import infrastructure.pg.connector as conn_mod
+
+    c = InMemoryConnector()
+    c.execute("CREATE TABLE memory_conv (id INT, tenant_id TEXT, permission TEXT, body TEXT)")
+    monkeypatch.setattr(conn_mod, "get_connector", lambda: c)
+    def boom(sql, params=()):
+        raise OperationalError("pg down")
+    monkeypatch.setattr(c, "execute", boom)
+    monkeypatch.setattr(c, "fetch_all", lambda sql, params=(): (_ for _ in ()).throw(OperationalError("pg down")))
+
+    asm = ContextAssembler(budget=TokenBudget(total=400, reserved_for_output=0),
+                           providers=[ConvMemoryProvider(MemoryStore(c))])
+    st = AgentState(task="x"); st.context["tenant_id"] = "t1"
+    def planner(state):
+        return {"action": "finish", "answer": "ok"}
+    run(st, planner=planner, assembler=asm, executor=lambda p, st: None)
+    rep = st.context.get("context_report", {})
+    assert any(s.startswith("memory_") for s in rep.get("skipped", []))
