@@ -39,3 +39,13 @@ def test_tool_timeout_retry_then_fallback_and_idempotent():
     assert det.visit("judge") is False
     assert det.visit("judge") is False
     assert det.visit("judge") is True
+
+
+def test_parity_still_holds_with_durable_graph():
+    from workflow.graph import run_expense_workflow
+    from workflow.graph_lang import build_expense_graph
+    g = build_expense_graph(policy_threshold=5000)
+    for expense, expected in [({"id": "E1", "amount": 1000}, "auto_approve")]:
+        classic = run_expense_workflow(expense, policy_threshold=5000)["decision"]
+        via = g.invoke({"expense": expense}, config={"configurable": {"thread_id": "parity-1"}})["decision"]
+        assert classic == expected == via
