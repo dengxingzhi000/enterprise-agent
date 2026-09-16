@@ -80,7 +80,8 @@ def test_assembler_bounds_long_task_and_reports():
     asm = ContextAssembler(budget=TokenBudget(total=800, reserved_for_output=100))
     msgs, report = asm.assemble(state)
     assert report["usage"] <= 800
-    assert report["dropped"], "超预算必须有丢弃记录"
+    # spec#2 压缩生效：可能无drop（compression吸收了overflow）也可能drop；两者都说明预算被约束
+    assert report["dropped"] or report.get("compressed"), "超预算必须有丢弃或压缩记录"
     assert any(m["role"] == "system" for m in msgs)
     assert report["counter_used"] in ("tiktoken", "heuristic")
 
