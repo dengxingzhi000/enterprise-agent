@@ -10,6 +10,15 @@ class BaseProvider:
     def collect(self, state: dict) -> list[dict]:
         raise NotImplementedError
 
+    def compress(self, segs: list[dict], keep_recent: int) -> tuple[list[dict], dict | None]:
+        if keep_recent <= 0 or keep_recent >= len(segs):
+            return segs, None
+        kept = segs[-keep_recent:]
+        old_text = "\n".join(s.get("text", "") for s in segs[:-keep_recent])
+        from .extract import extract
+        return kept, {"name": f"{self.name}:summary", "priority": self.priority,
+                      "text": extract(old_text)}
+
 
 class SystemProvider(BaseProvider):
     name, priority = "system", PRIORITY["system"]

@@ -36,3 +36,16 @@ def test_extract_short_max_chars():
         out = extract(text, max_chars=mc)
         assert len(out) <= mc, f"max_chars={mc} should not exceed limit, got {out!r}"
         assert "..." not in out, f"no '...' suffix expected when max_chars<3, got {out!r}"
+
+
+def test_provider_compress_keeps_recent_and_summarizes_old():
+    from agent.context.providers import ObservationProvider
+    state = {"observations": [{"tool": f"t{i}", "result": f"r{i}"} for i in range(20)]}
+    p = ObservationProvider(recent=10)
+    collected = p.collect(state)
+    kept, summary = p.compress(collected, keep_recent=5)
+    assert len(kept) == 5
+    assert summary is not None
+    assert summary["name"] == "observation:summary"
+    assert "…" in summary["text"]  # extract() joins head/keywords/tail with "…"
+    assert len(state["observations"]) == 20  # 原言保留
