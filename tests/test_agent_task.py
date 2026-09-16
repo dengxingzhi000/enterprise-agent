@@ -72,3 +72,43 @@ def test_pricing_accumulates_cost():
     assert isinstance(p, Pricing)
     cost = (100 / 1000) * p.input_per_1k + (50 / 1000) * p.output_per_1k
     assert cost > 0
+
+
+def test_loop_wraps_agent_state_and_emits_status_changes():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    from observability.tracing import Tracer
+    calls: list[dict] = []
+    class Fake(Tracer):
+        def log_event(self, trace_id, stage, data):
+            calls.append({"trace_id": trace_id, "stage": stage, "data": data})
+    t = Fake(); tid = t.start_trace("t")
+    s = AgentState(task="x"); s.context["trace_id"] = tid
+    run(s, planner=lambda st: {"action": "finish", "answer": "ok"},
+        executor=lambda p, st: None)
+    assert any(c["stage"] == "task_status_changed" and c["trace_id"] == tid for c in calls)
+
+
+def test_loop_max_iterations_marks_failed():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    def planner(state):
+        return {"action": "call_tool", "tool": "noop", "args": {}}
+    def executor(plan, state):
+        return {"tool": "noop", "result": "x"}
+    s = run(AgentState(task="x"), planner=planner, executor=executor, max_iterations=4)
+    at = s.context.get("agent_task")
+    assert at and at.status == "failed"
+    assert at.history[-1]["reason"] == "max_iterations"
+
+
+def test_loop_records_tokens_each_round():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    s = run(AgentState(task="x"),
+            planner=lambda st: {"action": "finish", "answer": "ok"},
+            executor=lambda p, st: None)
+    at = s.context.get("agent_task")
+    assert at.token_usage["input"] >= 1
+    assert at.token_usage["output"] >= 0
+    assert at.cost >= 0
