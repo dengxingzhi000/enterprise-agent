@@ -164,3 +164,52 @@ def test_assembler_skipped_providers_reported():
     assert msgs, "assemble must still return msgs on provider exception"
     assert "skipped" in report
     assert "boom" in report["skipped"]
+
+
+def test_assembler_same_name_segs_unique_drop():
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    from agent.context.providers import SystemProvider, RagProvider
+
+    class FixedCounter:
+        def count(self, text):
+            return 4
+
+    asm = ContextAssembler(
+        budget=TokenBudget(total=8, reserved_for_output=0),
+        providers=[SystemProvider(), RagProvider()],
+        counter=FixedCounter(),
+    )
+    state = {
+        "system": "sys",
+        "rag": [{"text": "low", "score": 0.1}, {"text": "high", "score": 0.9}],
+    }
+    msgs, report = asm.assemble(state)
+    contents = [m["content"] for m in msgs]
+    assert "high" in contents, f"high-score rag must survive, got {contents}"
+    assert "low" not in contents, f"low-score rag must be dropped, got {contents}"
+    assert "sys" in contents
+    assert report["dropped"] == ["rag"]
+
+
+def test_rag_provider_score_hardening_per_item():
+    import math
+    from agent.context.providers import RagProvider
+    rp = RagProvider()
+    rag = [
+        {"text": "good", "score": 0.9},
+        {"text": "nan", "score": float("nan")},
+        {"text": "inf", "score": float("inf")},
+        "notadict",
+        {"text": "missing"},
+    ]
+    segs = rp.collect({"rag": rag})
+    assert len(segs) == 4, f"bad items must be defaulted/skipped individually, got {segs}"
+    by_text = {s["text"]: s for s in segs}
+    assert by_text["good"]["priority"] == 58
+    assert by_text["nan"]["priority"] == 50
+    assert by_text["inf"]["priority"] == 50
+    assert by_text["missing"]["priority"] == 50
+    assert "notadict" not in by_text
+    for s in segs:
+        assert math.isfinite(s["priority"])

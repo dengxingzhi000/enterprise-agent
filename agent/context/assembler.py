@@ -18,14 +18,15 @@ class ContextAssembler:
                 for s in p.collect(state) or []:
                     s = dict(s)
                     s["tokens"] = self.counter.count(s.get("text", ""))
+                    s["idx"] = len(segs)
                     segs.append(s)
             except Exception:  # noqa: BLE001 - 单层故障跳过，不阻断
                 skipped.append(p.name)
         fits, usage, dropped = self.budget.check(segs)
         # 极端兜底：system/task 永不丢弃（即使仍超预算，后续靠截断收敛）
         dropped = [d for d in dropped if d.get("name") not in ("system", "task")]
-        kept_names = {d["name"] for d in dropped}
-        kept = [s for s in segs if s["name"] not in kept_names and not s.get("skipped")]
+        dropped_idx = {d["idx"] for d in dropped if "idx" in d}
+        kept = [s for s in segs if s.get("idx") not in dropped_idx and not s.get("skipped")]
         # 仍超：截最低优先级保留段尾部（用排序副本选 victim，保持 kept 原序）
         total = sum(s["tokens"] for s in kept)
         if total > self.budget.available and kept:

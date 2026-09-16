@@ -1,4 +1,6 @@
 """agent/context/providers.py: 6 基础 provider，memory深度版留 spec#2."""
+import math
+
 PRIORITY = {"system": 100, "task": 90, "tooltrace": 70, "rag": 60, "observation": 20, "conversation": 10}
 
 
@@ -51,14 +53,21 @@ class RagProvider(BaseProvider):
     def collect(self, state):
         out = []
         for r in state.get("rag", []):
-            score = r.get("score", 0.5)
             try:
-                score = float(score)
-            except (TypeError, ValueError):
-                score = 0.5
-            tier = 40 + int(score * 20)
-            tier = max(40, min(60, tier))
-            out.append({"name": self.name, "priority": tier, "text": r.get("text", "")})
+                if not isinstance(r, dict):
+                    continue
+                score = r.get("score", 0.5)
+                try:
+                    score = float(score)
+                except (TypeError, ValueError, OverflowError):
+                    score = 0.5
+                if not math.isfinite(score):
+                    score = 0.5
+                tier = 40 + int(score * 20)
+                tier = max(40, min(60, tier))
+                out.append({"name": self.name, "priority": tier, "text": r.get("text", "")})
+            except Exception:  # noqa: BLE001 - 单条坏数据跳过，不阻断整个 provider
+                continue
         return out
 
 
