@@ -1,4 +1,4 @@
-"""tests/test_memory_pg.py: Task 1 + Task 2 - InMemoryConnector + ensure_schema."""
+"""tests/test_memory_pg.py: Task 1 + Task 2 + Task 3 - connector + schema + MemoryStore."""
 
 
 def test_inmemory_connector_crud_and_healthcheck():
@@ -21,3 +21,28 @@ def test_ensure_schema_idempotent_on_inmemory(monkeypatch):
     ensure_schema(c)
     rows = c.fetch_all("SELECT 1")
     assert rows is not None
+
+
+def test_memory_store_tenant_isolation_and_permission_filter():
+    from infrastructure.pg.connector import InMemoryConnector
+    from agent.memory.store import MemoryStore
+    c = InMemoryConnector()
+    c.execute("CREATE TABLE memory_user (id INT, tenant_id TEXT, permission TEXT, body TEXT)")
+    s = MemoryStore(c)
+    s.put("user", "tenant_a", {"name": "alice"}, permission="public")
+    s.put("user", "tenant_b", {"name": "bob"}, permission="public")
+    rows = s.query("user", "tenant_a", permission="public")
+    assert len(rows) == 1
+    assert rows[0]["body"]["name"] == "alice"
+
+
+def test_memory_store_outage_degrades_silently(monkeypatch):
+    from infrastructure.pg.connector import InMemoryConnector, OperationalError
+    from agent.memory.store import MemoryStore
+    c = InMemoryConnector()
+    s = MemoryStore(c)
+    def boom(sql, params=()):
+        raise OperationalError("pg down")
+    monkeypatch.setattr(c, "execute", boom)
+    s.put("user", "tenant_a", {"x": 1})  # 不抛
+    assert s.query("user", "tenant_a", permission="public") == []
