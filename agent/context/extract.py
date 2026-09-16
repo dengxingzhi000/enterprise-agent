@@ -12,13 +12,17 @@ def _split_sentences(text: str) -> list[str]:
     return parts or [text.strip()]
 
 def _keywords(text: str, top: int = 5) -> list[str]:
+    seen_lower: set[str] = set()
     seen: list[str] = []
     for tok in text.split():
         t = tok.strip(".,;:!?()[]{}<>\"'`·、，。；：！？()【】《》 ")
         if len(t) < 3 or t.lower() in _STOPWORDS or not any(ch.isalnum() for ch in t):
             continue
-        if t not in seen:
-            seen.append(t)
+        low = t.lower()
+        if low in seen_lower:
+            continue
+        seen_lower.add(low)
+        seen.append(t)
         if len(seen) >= top:
             break
     return seen
@@ -32,12 +36,12 @@ def extract(text: str, max_chars: int = 200) -> str:
     kws = _keywords(text)
     if not kws:
         return "[empty-content]"
-    parts = [head]
-    if kws:
-        parts.append("关键词:" + ",".join(kws))
+    parts = [head, "关键词:" + ",".join(kws)]
     if tail and tail != head:
         parts.append(tail)
     out = "…".join(parts)
+    if max_chars < 3:
+        return out[:max_chars]
     if len(out) > max_chars:
         out = out[: max_chars - 3] + "..."
     return out
