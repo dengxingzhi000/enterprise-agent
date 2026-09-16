@@ -19,6 +19,8 @@ dependencies = [
 # "langgraph-checkpoint-postgres>=2.0",
 # "psycopg[binary]>=3.1",
 # "redis>=5.0",
+# Optional context token counting (offline CI must stay green — do NOT hard-require; runtime falls back to heuristic):
+# "tiktoken>=0.7",
 
 [build-system]
 requires = ["setuptools>=61"]
