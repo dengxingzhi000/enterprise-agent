@@ -139,3 +139,65 @@ def test_assembler_compresses_per_layer_not_per_seg():
                        and "ERROR" in m["content"]
                        for m in msgs)
     assert summary_seen, f"expected summary head in msgs, got: {[m['content'][:40] for m in msgs]}"
+
+
+def test_loop_emits_tracer_event_when_trace_id_present(monkeypatch):
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    import observability.tracing as tracing
+    from observability.tracing import Tracer
+
+    asm = ContextAssembler(budget=TokenBudget(total=400, reserved_for_output=0))
+    calls: list[dict] = []
+
+    class FakeTracer(Tracer):
+        def log_event(self, trace_id, stage, data):
+            calls.append({"trace_id": trace_id, "stage": stage, "data": data})
+
+    monkeypatch.setattr(tracing.Tracer, "log_event", FakeTracer.log_event)
+    t = FakeTracer()
+    tid = t.start_trace("t")
+    s = AgentState(task="x")
+    s.context["trace_id"] = tid
+    s.context["system"] = "你是助手。"
+    s.context["rag"] = []
+
+    def planner(state):
+        return {"action": "finish", "answer": "ok"}
+
+    run(s, planner=planner, assembler=asm, executor=lambda p, st: None)
+    assert any(c["stage"] == "context_assemble" and c["trace_id"] == tid for c in calls), (
+        f"expected a context_assemble log_event for trace_id={tid}, got calls={calls}"
+    )
+
+
+def test_loop_silent_when_no_trace_id():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    import observability.tracing as tracing
+
+    asm = ContextAssembler(budget=TokenBudget(total=400, reserved_for_output=0))
+    calls = {"n": 0}
+    orig = tracing.Tracer.log_event
+
+    def counting(self, trace_id, stage, data):
+        calls["n"] += 1
+        return orig(self, trace_id, stage, data)
+
+    tracing.Tracer.log_event = counting
+    try:
+        s = AgentState(task="x")
+
+        def planner(state):
+            return {"action": "finish", "answer": "ok"}
+
+        run(s, planner=planner, assembler=asm, executor=lambda p, st: None)
+        assert calls["n"] == 0, (
+            f"Tracer.log_event must not be called when no trace_id in context, got n={calls['n']}"
+        )
+    finally:
+        tracing.Tracer.log_event = orig
