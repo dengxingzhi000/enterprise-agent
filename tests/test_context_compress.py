@@ -82,3 +82,18 @@ def test_provider_compress_overflow_keeps_all():
     kept, summary = p.compress(segs, keep_recent=len(segs))
     assert kept is segs
     assert summary is None
+
+
+def test_assembler_compresses_when_over_trigger_ratio():
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    big = "ERROR trace " * 50
+    state = {"task": "查500", "system": "你是助手。",
+             "messages": [{"role": "user", "content": f"msg-{i}"} for i in range(20)],
+             "observations": [{"tool": "logs.tail", "result": big} for _ in range(20)]}
+    asm = ContextAssembler(budget=TokenBudget(total=800, reserved_for_output=100),
+                           trigger_ratio=0.5)
+    msgs, report = asm.assemble(state)
+    assert report["usage"] <= 800
+    providers = {c["provider"] for c in report.get("compressed", [])}
+    assert "observation" in providers or "conversation" in providers
