@@ -213,3 +213,34 @@ def test_rag_provider_score_hardening_per_item():
     assert "notadict" not in by_text
     for s in segs:
         assert math.isfinite(s["priority"])
+
+
+def test_loop_with_assembler_bounded_and_answer_preserved():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    from agent.context.assembler import ContextAssembler
+    from agent.context.budget import TokenBudget
+    calls = {"n": 0}
+    def planner(state):
+        calls["n"] += 1
+        if calls["n"] <= 15:
+            return {"action": "call_tool", "tool": "logs.tail", "args": {}}
+        return {"action": "finish", "answer": "根因：网关超时"}
+    def executor(plan, state):
+        return {"tool": plan["tool"], "result": "ERROR trace " * 100}
+    s1 = run(AgentState(task="查500"), planner=planner, executor=executor, max_iterations=20)
+    calls["n"] = 0
+    asm = ContextAssembler(budget=TokenBudget(total=1200, reserved_for_output=200))
+    s2 = run(AgentState(task="查500"), planner=planner, executor=executor, assembler=asm, max_iterations=20)
+    assert s1.answer == s2.answer == "根因：网关超时"
+    _, report = asm.assemble({"task": s2.task, "messages": s2.messages,
+                              "observations": s2.observations, "tool_calls": s2.tool_calls})
+    assert report["usage"] <= 1200
+
+
+def test_quality_gate_baseline_vs_managed():
+    from evaluation.evaluator import context_quality_gate
+    out = context_quality_gate(baseline={"decision": "human_review", "usage": 10000},
+                               managed={"decision": "human_review", "usage": 6000})
+    assert out["pass"] is True
+    assert out["usage_ratio"] == 0.6
