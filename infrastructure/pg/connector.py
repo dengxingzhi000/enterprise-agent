@@ -19,6 +19,8 @@ class BaseConnector:
 
     def healthcheck(self) -> bool: ...
 
+    def ensure_schema(self) -> None: ...
+
 
 class InMemoryConnector(BaseConnector):
     def __init__(self):
@@ -79,6 +81,9 @@ class InMemoryConnector(BaseConnector):
     def healthcheck(self) -> bool:
         return True
 
+    def ensure_schema(self) -> None:
+        return None
+
 
 class PGConnector(BaseConnector):
     def __init__(self, dsn: str, pool_size: int = 5):
@@ -91,7 +96,7 @@ class PGConnector(BaseConnector):
     def _run(self, op: str, sql: str, params: Sequence[Any] = ()):
         from sqlalchemy import text
         last: Exception | None = None
-        for attempt in range(1, 4):
+        for attempt in range(1, 5):
             try:
                 with self._engine.connect() as conn:
                     result = conn.execute(text(sql), tuple(params))
@@ -102,7 +107,7 @@ class PGConnector(BaseConnector):
                     return rows if op == "fetch_all" else (rows[0] if rows else None)
             except Exception as e:  # noqa: BLE001 - retry all to keep contract
                 last = e
-                if attempt < 3:
+                if attempt < 4:
                     time.sleep(2 ** (attempt - 1))
         raise OperationalError(str(last))
 
@@ -120,6 +125,10 @@ class PGConnector(BaseConnector):
             return self.fetch_one("SELECT 1") is not None
         except Exception:
             return False
+
+    def ensure_schema(self) -> None:
+        from .schema import ensure_schema as _ensure
+        _ensure(self)
 
 
 def get_connector() -> BaseConnector:
