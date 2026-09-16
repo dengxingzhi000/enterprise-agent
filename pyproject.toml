@@ -12,12 +12,13 @@ dependencies = [
   "openai>=1.40",
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
+  "sqlalchemy>=2.0",
+  "psycopg[binary]>=3.1",
 ]
 
 # Optional durable/LangGraph deps (offline CI must stay green — do NOT make hard requirements):
 # "langgraph>=0.2",
 # "langgraph-checkpoint-postgres>=2.0",
-# "psycopg[binary]>=3.1",
 # "redis>=5.0",
 # Optional context token counting (offline CI must stay green — do NOT hard-require; runtime falls back to heuristic):
 # "tiktoken>=0.7",
@@ -27,7 +28,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["apps*", "agent*", "knowledge*", "security*", "workflow*", "observability*", "evaluation*"]
+include = ["apps*", "agent*", "infrastructure*", "knowledge*", "security*", "workflow*", "observability*", "evaluation*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -1,4 +1,11 @@
-"""五层记忆内存版：Conversation/Task/User/Org/Episodic。Redis/pgvector是下一步替换存储。"""
+"""五层记忆：内存版（dict 兜底）+ connector 注入版并存，向后兼容 tests/test_memory.py。
+
+LAYERS = ("user", "org", "conv", "task", "episodic")，对应五张 memory_<layer> 表。
+"""
+import json
+import warnings
+
+from infrastructure.pg.connector import OperationalError
 
 
 def _score(query: str, text: str) -> float:
@@ -13,7 +20,10 @@ def _score(query: str, text: str) -> float:
 
 
 class MemoryStore:
-    def __init__(self):
+    LAYERS = ("user", "org", "conv", "task", "episodic")
+
+    def __init__(self, connector=None):
+        self._c = connector
         self._conversations: dict[tuple, list[dict]] = {}
         self._tasks: dict[str, dict] = {}
         self._episodic: dict[tuple, list[str]] = {}
@@ -57,3 +67,69 @@ class MemoryStore:
 
     def get_org_memory(self, tenant_id: str) -> dict:
         return self._orgs.get(tenant_id, {})
+
+    # --- Connector 注入版（PG/InMemory 共用接口，tenant 隔离 + permission 过滤） ---
+    def put(self, layer: str, tenant_id: str, body: dict, department: str | None = None,
+            permission: str = "public", version: int = 1, key: str | None = None) -> None:
+        if self._c is None:
+            return
+        if layer not in self.LAYERS:
+            raise ValueError(f"unknown layer: {layer}")
+        if not tenant_id:
+            raise ValueError("tenant_id required")
+        if permission == "*":
+            raise ValueError("permission='*' forbidden")
+        try:
+            self._c.execute(
+                f"INSERT INTO memory_{layer} (tenant_id, department, permission, version, body) "
+                f"VALUES (?, ?, ?, ?, ?)",
+                (tenant_id, department, permission, version, json.dumps(body)),
+            )
+        except OperationalError as e:
+            warnings.warn(f"memory put outage layer={layer}: {e}")
+
+    def query(self, layer: str, tenant_id: str, permission: str = "public",
+              department: str | None = None, limit: int = 10) -> list[dict]:
+        if self._c is None:
+            return []
+        if layer not in self.LAYERS:
+            raise ValueError(f"unknown layer: {layer}")
+        where_parts = ["tenant_id = ?", "permission = ?"]
+        params: list = [tenant_id, permission]
+        if department is not None:
+            where_parts.append("department = ?")
+            params.append(department)
+        params.append(limit)
+        try:
+            rows = self._c.fetch_all(
+                f"SELECT body, tenant_id, permission, department FROM memory_{layer} "
+                f"WHERE {' AND '.join(where_parts)} "
+                f"ORDER BY updated_at DESC LIMIT ?",
+                tuple(params),
+            )
+        except OperationalError:
+            return []
+        result: list[dict] = []
+        for r in rows:
+            if r.get("tenant_id") != tenant_id:
+                continue
+            if r.get("permission") != permission:
+                continue
+            if department is not None and r.get("department") != department:
+                continue
+            body = r.get("body")
+            if body is None:
+                continue
+            try:
+                parsed = json.loads(body)
+            except (TypeError, ValueError):
+                continue
+            out = dict(r)
+            out["body"] = parsed
+            result.append(out)
+            if len(result) >= limit:
+                break
+        return result
+
+    def get(self, layer: str, tenant_id: str, permission: str = "public") -> list[dict]:
+        return self.query(layer, tenant_id, permission=permission)

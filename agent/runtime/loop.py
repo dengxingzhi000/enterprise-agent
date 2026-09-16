@@ -25,7 +25,8 @@ def run(
                 llm_messages, report = assembler.assemble(
                     {"task": state.task, "messages": state.messages,
                      "observations": state.observations, "tool_calls": state.tool_calls,
-                     "rag": state.context.get("rag", []), "system": state.context.get("system", "")})
+                     "rag": state.context.get("rag", []), "system": state.context.get("system", ""),
+                     "tenant_id": state.context.get("tenant_id", "default")})
                 state.context["context_report"] = report
                 trace_id = state.context.get("trace_id")
                 if trace_id:

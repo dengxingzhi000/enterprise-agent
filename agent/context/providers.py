@@ -1,7 +1,8 @@
-"""agent/context/providers.py: 6 基础 provider，memory深度版留 spec#2."""
+"""agent/context/providers.py: 6 基础 provider + 4 memory provider，memory深度版留 spec#2."""
 import math
 
-PRIORITY = {"system": 100, "task": 90, "tooltrace": 70, "rag": 60, "observation": 20, "conversation": 10}
+PRIORITY = {"system": 100, "task": 90, "tooltrace": 70, "rag": 60, "observation": 20, "conversation": 10,
+            "memory_user": 25, "memory_org": 30, "memory_conv": 35, "memory_episodic": 40}
 
 
 class BaseProvider:
@@ -87,5 +88,17 @@ class ToolTraceProvider(BaseProvider):
                 for t in state.get("tool_calls", [])]
 
 
-DEFAULT_PROVIDERS = [SystemProvider(), TaskProvider(), RagProvider(),
-                     ObservationProvider(), ConversationProvider(), ToolTraceProvider()]
+DEFAULT_PROVIDERS: list | None = None
+
+
+def get_default_providers() -> list:
+    global DEFAULT_PROVIDERS
+    if DEFAULT_PROVIDERS is not None:
+        return DEFAULT_PROVIDERS
+    from .memory_providers import (UserMemoryProvider, OrgMemoryProvider,
+                                   ConvMemoryProvider)
+    DEFAULT_PROVIDERS = [SystemProvider(), TaskProvider(), RagProvider(),
+                        ObservationProvider(), ConversationProvider(),
+                        UserMemoryProvider(), OrgMemoryProvider(), ConvMemoryProvider(),
+                        ToolTraceProvider()]
+    return DEFAULT_PROVIDERS
