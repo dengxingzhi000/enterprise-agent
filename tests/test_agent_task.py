@@ -160,3 +160,16 @@ def test_loop_records_tokens_on_unknown_action_failure():
     assert at.status == "failed"
     assert at.history[-1]["reason"] == "unknown_action"
     assert at.token_usage["input"] >= 1
+
+
+def test_api_returns_task_id_and_status():
+    from fastapi.testclient import TestClient
+    from apps.api.main import app
+    c = TestClient(app)
+    r = c.post("/chat", json={"message": "x"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] in ("done", "failed")
+    assert "task_id" in body
+    assert body["task_id"]
+    assert "token_usage" in body or body.get("status") == "failed"

@@ -6,6 +6,7 @@ from typing import Any
 @dataclass
 class AgentState:
     task: str
+    task_id: str | None = None
     messages: list[dict] = field(default_factory=list)
     plan: dict | None = None
     observations: list[dict] = field(default_factory=list)
