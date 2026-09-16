@@ -17,3 +17,25 @@ def test_expense_pause_and_resume_same_thread():
     done = g2.invoke(None, config={"configurable": {"thread_id": "task-9"}})
     assert done["decision"] == "human_review"
     assert "judge_rule" in done["trace"]
+
+
+def test_tool_timeout_retry_then_fallback_and_idempotent():
+    from workflow.durable import run_with_retry, IdempotencyStore, LoopDetector
+    calls = {"n": 0}
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("tool timeout")
+        return "ok-fallback"
+    store = IdempotencyStore()
+    out = run_with_retry("task-7:toolB", flaky, store=store, retries=3, timeout=1.0)
+    assert out == "ok-fallback"
+    assert calls["n"] == 3
+    out2 = run_with_retry("task-7:toolB", flaky, store=store, retries=3, timeout=1.0)
+    assert out2 == "ok-fallback"
+    assert calls["n"] == 3
+    det = LoopDetector(limit=3)
+    assert det.visit("judge") is False
+    assert det.visit("judge") is False
+    assert det.visit("judge") is False
+    assert det.visit("judge") is True
