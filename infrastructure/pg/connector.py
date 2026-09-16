@@ -31,7 +31,7 @@ class InMemoryConnector(BaseConnector):
     @staticmethod
     def _resolve_table(sql: str) -> str:
         sql_low = sql.strip().lower()
-        for kw in ("insert into", "select * from", "select from", "from"):
+        for kw in ("create table", "insert into", "select * from", "select from", "from"):
             idx = sql_low.find(kw)
             if idx >= 0:
                 rest = sql_low[idx + len(kw):].lstrip()
@@ -52,6 +52,21 @@ class InMemoryConnector(BaseConnector):
                 cols.append(tok[0])
         return cols
 
+    @staticmethod
+    def _parse_insert_cols(sql_strip: str) -> list[str] | None:
+        low = sql_strip.lower()
+        values_idx = low.find("values")
+        if values_idx < 0:
+            return None
+        paren_open = low.find("(", 0, values_idx)
+        if paren_open < 0:
+            return None
+        paren_close = low.find(")", paren_open + 1, values_idx)
+        if paren_close < 0:
+            return None
+        cols_sql = sql_strip[paren_open + 1: paren_close]
+        return [c.strip() for c in cols_sql.split(",") if c.strip()]
+
     def execute(self, sql: str, params: Sequence[Any] = ()) -> None:
         with self._lock:
             sql_strip = sql.strip()
@@ -63,9 +78,13 @@ class InMemoryConnector(BaseConnector):
                 self._cols[tname] = cols
             elif low.startswith("insert into"):
                 tname = self._resolve_table(sql_strip)
-                cols = self._cols.get(tname) or [
-                    f"c{i}" for i in range(len(params))
-                ]
+                explicit_cols = self._parse_insert_cols(sql_strip)
+                if explicit_cols is not None:
+                    cols = explicit_cols
+                else:
+                    cols = self._cols.get(tname) or [
+                        f"c{i}" for i in range(len(params))
+                    ]
                 row = dict(zip(cols, params))
                 self._tables.setdefault(tname, []).append(row)
 
