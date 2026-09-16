@@ -4,9 +4,12 @@ from itertools import count
 
 
 class Tracer:
+    _shared: "Tracer | None" = None
+
     def __init__(self):
         self._traces: dict[str, dict] = {}
         self._seq = count(1)
+        Tracer._shared = self
 
     def start_trace(self, task: str) -> str:
         tid = f"tr-{next(self._seq)}"

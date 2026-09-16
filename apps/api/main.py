@@ -8,13 +8,14 @@ from agent.runtime.llm_planner import build_deepseek_planner, get_default_client
 from infrastructure.pg.connector import get_connector
 from infrastructure.pg.schema import ensure_schema
 
-app = FastAPI(title="Enterprise Agent Gateway", version="0.1.0")
+app = FastAPI(title="Enterprise Agent Gateway", version="0.4.0")
 
 
 class ChatRequest(BaseModel):
     message: str
     user_id: str = "u1"
     tenant_id: str = "t1"
+    task_id: str | None = None
 
 
 @app.get("/health")
@@ -37,6 +38,18 @@ def chat(req: ChatRequest):
     client, model = get_default_client()
     planner = build_deepseek_planner(client=client, model=model)
     st = AgentState(task=req.message)
+    if req.task_id:
+        st.task_id = req.task_id
     st.context["tenant_id"] = req.tenant_id
     final = run(st, planner=planner)
-    return {"reply": final.answer, "status": final.status, "user_id": req.user_id}
+    at = final.context.get("agent_task")
+    payload = {
+        "reply": final.answer,
+        "status": final.status,
+        "user_id": req.user_id,
+        "task_id": at.task_id if at else None,
+    }
+    if at and final.status != "failed":
+        payload["token_usage"] = dict(at.token_usage)
+        payload["cost"] = at.cost
+    return payload
