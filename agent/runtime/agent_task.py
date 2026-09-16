@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from .state import AgentState
 from .status import ALLOWED_TRANSITIONS
 
+MAX_HISTORY = 50
+
 
 class AgentTaskError(Exception):
     pass
@@ -45,6 +47,8 @@ class AgentTask:
         self.status = to
         self.updated_at = _now()
         self.history.append({"from": prev, "to": to, "reason": reason, "ts": self.updated_at})
+        if len(self.history) > MAX_HISTORY:
+            self.history = self.history[-MAX_HISTORY:]
 
     def attach_checkpoint(self, thread_id: str) -> None:
         if not thread_id:

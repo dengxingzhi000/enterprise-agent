@@ -27,3 +27,16 @@ def test_agent_task_transition_legal_and_illegal():
     assert t.status == "done"
     with pytest.raises(InvalidTransition):
         t.transition("running")
+
+
+def test_agent_task_history_capped_at_50():
+    t = AgentTask.from_state(AgentState(task="x"))
+    t.transition("running")
+    for _ in range(60):
+        if t.status == "running":
+            t.transition("paused")
+        else:
+            t.transition("running")
+    assert len(t.history) == 50
+    assert t.history[0]["from"] == "running"
+    assert t.history[-1]["from"] == "paused"
