@@ -28,10 +28,10 @@ def test_tool_timeout_retry_then_fallback_and_idempotent():
             raise TimeoutError("tool timeout")
         return "ok-fallback"
     store = IdempotencyStore()
-    out = run_with_retry("task-7:toolB", flaky, store=store, retries=3, timeout=1.0)
+    out = run_with_retry("task-7:toolB", flaky, store=store, retries=3, timeout=1.0, backoff=0.0)
     assert out == "ok-fallback"
     assert calls["n"] == 3
-    out2 = run_with_retry("task-7:toolB", flaky, store=store, retries=3, timeout=1.0)
+    out2 = run_with_retry("task-7:toolB", flaky, store=store, retries=3, timeout=1.0, backoff=0.0)
     assert out2 == "ok-fallback"
     assert calls["n"] == 3
     det = LoopDetector(limit=3)
@@ -95,3 +95,80 @@ def test_pause_creates_approval_pending_entry_and_resume():
     assert len(pendings) >= 1, "pause must dual-write ApprovalStore pending entry"
     done = g.invoke(None, config={"configurable": {"thread_id": "task-apr-1"}})
     assert done["decision"] == "human_review"
+
+
+def test_run_with_retry_default_backoff_is_spec_1s():
+    import inspect
+    from workflow.durable import run_with_retry
+    sig = inspect.signature(run_with_retry)
+    assert sig.parameters["backoff"].default == 1.0, "spec backoff 1s/2s/4s requires default 1.0"
+
+
+def test_fault_chain_timeout_retry_fallback_human_trace_order():
+    from workflow.graph_lang import build_expense_graph
+    from workflow.checkpoint import get_checkpointer
+    from security.approval import ApprovalStore
+    import workflow.nodes.expense as n
+
+    orig = n.check_amount
+
+    def always_timeout(state):
+        raise TimeoutError("tool timeout")
+
+    n.check_amount = always_timeout
+    try:
+        approvals = ApprovalStore()
+        cp = get_checkpointer(dsn=None)
+        g = build_expense_graph(policy_threshold=5000, checkpointer=cp, approval_store=approvals)
+        import time as _time
+        orig_sleep = _time.sleep
+        sleeps: list = []
+        try:
+            _time.sleep = lambda s: sleeps.append(s)  # type: ignore
+            out = g.invoke({"expense": {"id": "E-fault-1", "amount": 100}},
+                           config={"configurable": {"thread_id": "fault-1"}})
+        finally:
+            _time.sleep = orig_sleep  # type: ignore
+        trace = out.get("trace", [])
+        idx = {}
+        for k in ("timeout", "retry", "fallback", "human"):
+            assert k in trace, f"fault-chain trace missing {k}: {trace}"
+            idx[k] = trace.index(k)
+        assert idx["timeout"] < idx["retry"] < idx["fallback"] < idx["human"], trace
+        assert out["decision"] in ("paused_human_review", "human_review")
+        pendings = [v for v in approvals._items.values() if v["status"] == "pending"]
+        assert len(pendings) >= 1, "retry exhaustion must create ApprovalStore pending (human)"
+    finally:
+        n.check_amount = orig
+
+
+def test_graph_level_idempotent_no_double_call():
+    from workflow.graph_lang import build_expense_graph
+    from workflow.checkpoint import get_checkpointer
+    import workflow.nodes.expense as n
+
+    calls = {"n": 0}
+    orig_fetch = n.fetch_expense
+
+    def counting_fetch(state):
+        calls["n"] += 1
+        return orig_fetch(state)
+
+    n.fetch_expense = counting_fetch
+    try:
+        cp = get_checkpointer(dsn=None)
+        g = build_expense_graph(policy_threshold=5000, checkpointer=cp)
+        tid = "idem-graph-1"
+        exp = {"id": "E-idem-1", "amount": 100}
+        first = g.invoke({"expense": dict(exp)}, config={"configurable": {"thread_id": tid}})
+        n1 = calls["n"]
+        trace_len1 = len(first.get("trace", []))
+        second = g.invoke({"expense": dict(exp)}, config={"configurable": {"thread_id": tid}})
+        assert calls["n"] == n1, f"second invoke re-ran nodes: {calls['n']} vs {n1}"
+        assert len(second.get("trace", [])) == trace_len1, (first, second)
+        store = getattr(g, "idempotency_store", None) or getattr(g, "_idem_store", None)
+        assert store is not None, "graph adapter must expose idempotency store (guard wired)"
+        mem = getattr(store, "_mem", {})
+        assert any(k.startswith(f"{tid}:") for k in mem.keys()), f"keys must use thread_id:node prefix, got {list(mem.keys())}"
+    finally:
+        n.fetch_expense = orig_fetch

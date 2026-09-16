@@ -37,10 +37,22 @@ def _langgraph_imports():
         return None
 
 
-def _build_real_expense_graph(policy_threshold, native_saver, approvals):
+def _build_real_expense_graph(policy_threshold, native_saver, approvals,
+                               _idem_store=None, _loops=None):
     """REAL StateGraph 路径：仅在 langgraph 已安装时调用。"""
     StateGraph, END, interrupt = _langgraph_imports()
     from .nodes import expense as n
+    from .durable import run_with_retry, IdempotencyStore, LoopDetector
+
+    idem = _idem_store if _idem_store is not None else IdempotencyStore()
+    loops: dict[str, LoopDetector] = _loops if _loops is not None else {}
+
+    def _loop_for(tid: str) -> LoopDetector:
+        det = loops.get(tid)
+        if det is None:
+            det = LoopDetector(limit=8)
+            loops[tid] = det
+        return det
 
     def _tid_of(config, default="default"):
         try:
@@ -48,19 +60,51 @@ def _build_real_expense_graph(policy_threshold, native_saver, approvals):
         except Exception:
             return default
 
+    def _guarded(node: str, fn, state: dict, tid: str) -> dict:
+        # Loop guard → failed loop_detected; retry exhaustion → fallback + human chain.
+        det = _loop_for(tid)
+        if det.visit(node):
+            out = dict(state)
+            out.setdefault("trace", []).append("loop_detected")
+            out["_loop_failed"] = True
+            out["_failed_node"] = node
+            return out
+        try:
+            out = run_with_retry(f"{tid}:{node}", lambda: fn(dict(state)),
+                                 store=idem, retries=3, timeout=5.0, backoff=1.0)
+            if isinstance(state, dict) and state.get("_fallback_human"):
+                out["_fallback_human"] = True
+                out["need_human"] = True
+            return out
+        except Exception as e:  # noqa: BLE001 - fallback→human
+            out = dict(state)
+            out.setdefault("trace", []).extend(["timeout", "retry", "fallback", "human"])
+            out["_fallback_node"] = node
+            out["_fallback_error"] = f"{type(e).__name__}: {e}"
+            out["need_human"] = True
+            out["_fallback_human"] = True
+            try:
+                approvals.request(user={"thread_id": tid}, tool="expense_approval",
+                                  args={"expense": out.get("expense", {}), "thread_id": tid})
+            except Exception:
+                pass
+            return out
+
     def fetch(state: dict, config=None) -> dict:
-        return n.fetch_expense(dict(state))
+        return _guarded("fetch_expense", n.fetch_expense, dict(state), _tid_of(config))
 
     def check(state: dict, config=None) -> dict:
-        return n.check_amount(dict(state))
+        return _guarded("check_amount", n.check_amount, dict(state), _tid_of(config))
 
     def policy(state: dict, config=None) -> dict:
-        return n.retrieve_policy(dict(state))
+        return _guarded("retrieve_policy", n.retrieve_policy, dict(state), _tid_of(config))
 
     def judge(state: dict, config=None) -> dict:
-        out = n.judge_rule(dict(state))
+        tid = _tid_of(config)
+        out = _guarded("judge_rule", n.judge_rule, dict(state), tid)
+        if out.get("_loop_failed"):
+            return out
         if out.get("need_human"):
-            tid = _tid_of(config)
             try:
                 approvals.request(
                     user={"thread_id": tid},
@@ -102,6 +146,8 @@ def _build_real_expense_graph(policy_threshold, native_saver, approvals):
         def __init__(self):
             self.approval_store = approvals
             self.approvals = approvals
+            self.idempotency_store = idem
+            self._idem_store = idem
 
         def invoke(self, state, config=None):
             tid = _tid_of(config)
@@ -149,15 +195,27 @@ def build_expense_graph(policy_threshold: float = 5000, checkpointer=None, _stor
     durable = checkpointer is not None or _store is not None
     approvals = approval_store if approval_store is not None else ApprovalStore()
     from .nodes import expense as n
+    from .durable import run_with_retry, IdempotencyStore, LoopDetector
 
     _fns = (n.fetch_expense, n.check_amount, n.retrieve_policy, n.judge_rule)
+    # Durable guard stores (offline dict fallback inside IdempotencyStore).
+    _idem_store = IdempotencyStore()
+    _loops: dict[str, LoopDetector] = {}
+
+    def _loop_for(tid: str) -> LoopDetector:
+        det = _loops.get(tid)
+        if det is None:
+            det = LoopDetector(limit=8)
+            _loops[tid] = det
+        return det
 
     # 真图路径：langgraph 可导入且 checkpointer 为原生 saver 时启用。
     if _langgraph_imports() is not None and _native_saver_of(store) is not None:
-        return _build_real_expense_graph(policy_threshold, _native_saver_of(store), approvals)
+        return _build_real_expense_graph(policy_threshold, _native_saver_of(store), approvals,
+                                         _idem_store=_idem_store, _loops=_loops)
 
     # 仿真路径（离线/无 langgraph）：诚实的 _DurableAdapter，不伪装成真图。
-    def run_all(exp, resumed_state=None):
+    def run_all(exp, resumed_state=None, tid: str = "default"):
         if resumed_state:
             s = dict(resumed_state)
             s["expense"] = exp
@@ -166,10 +224,35 @@ def build_expense_graph(policy_threshold: float = 5000, checkpointer=None, _stor
             s["_done"] = list(resumed_state.get("_done", []))
         else:
             s = {"expense": exp, "policy_threshold": policy_threshold, "trace": [], "_done": []}
+        det = _loop_for(tid)
         for fn in _fns:
-            if fn.__name__ not in s.get("_done", []):
-                s = fn(s)
-                s.setdefault("_done", []).append(fn.__name__)
+            node = fn.__name__
+            if node not in s.get("_done", []):
+                # Loop guard first: visit-count check.
+                if det.visit(node):
+                    s.setdefault("trace", []).append("loop_detected")
+                    s["_loop_failed"] = True
+                    s["_failed_node"] = node
+                    break
+                # Durable guard: timeout/retry/idempotent wrapping.
+                # Key format enforced: f"{thread_id}:{node}".
+                key = f"{tid}:{node}"
+                try:
+                    s = run_with_retry(key, lambda fn=fn: fn(s), store=_idem_store,
+                                       retries=3, timeout=5.0, backoff=1.0)
+                    # Fallback is sticky: later deterministic nodes must not clear human routing.
+                    if s.get("_fallback_human"):
+                        s["need_human"] = True
+                except Exception as e:  # noqa: BLE001 - retry exhaustion → fallback→human
+                    s.setdefault("trace", []).extend(["timeout", "retry", "fallback", "human"])
+                    s["_fallback_node"] = node
+                    s["_fallback_error"] = f"{type(e).__name__}: {e}"
+                    s["need_human"] = True
+                    s["_fallback_human"] = True
+                    _ensure_pending(tid, exp)
+                    s.setdefault("_done", []).append(node)
+                    continue
+                s.setdefault("_done", []).append(node)
         return s
 
     def _save(tid, out, exp):
@@ -183,6 +266,9 @@ def build_expense_graph(policy_threshold: float = 5000, checkpointer=None, _stor
                     "amount_ok": out.get("amount_ok"),
                     "policy_text": out.get("policy_text"),
                     "policy_threshold": policy_threshold,
+                    "_fallback_human": out.get("_fallback_human", False),
+                    "_fallback_node": out.get("_fallback_node"),
+                    "_fallback_error": out.get("_fallback_error"),
                 })
             except Exception:
                 pass
@@ -201,12 +287,39 @@ def build_expense_graph(policy_threshold: float = 5000, checkpointer=None, _stor
         except Exception:
             return None
 
+    def _reset_guard_for_new_expense(tid: str) -> None:
+        # Same tid reused with a different expense (e.g. parity tests using
+        # default tid): stale f"{tid}:{node}" idempotency entries must not leak
+        # across expenses. Clear tid-prefixed keys + reset visit counts.
+        try:
+            mem = getattr(_idem_store, "_mem", None)
+            if isinstance(mem, dict):
+                for k in [k for k in mem.keys() if k.startswith(f"{tid}:")]:
+                    mem.pop(k, None)
+            r = getattr(_idem_store, "_redis", None)
+            if r is not None:
+                try:
+                    for node in ("fetch_expense", "check_amount", "retrieve_policy", "judge_rule"):
+                        r.delete(f"{tid}:{node}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            from .durable import LoopDetector as _LD
+            _loops[tid] = _LD(limit=8)
+        except Exception:
+            pass
+
     class _DurableAdapter:
         # HITL convention: pause 时双写 ApprovalStore（apr-* pending），
         # caller approve 后用 same thread_id invoke(None) 恢复。
         def __init__(self):
             self.approval_store = approvals
             self.approvals = approvals
+            # Exposed for graph-level idempotency assertions (key f"{tid}:{node}").
+            self.idempotency_store = _idem_store
+            self._idem_store = _idem_store
 
         def invoke(self, state, config=None):
             tid = (config or {}).get("configurable", {}).get("thread_id", "default")
@@ -214,7 +327,12 @@ def build_expense_graph(policy_threshold: float = 5000, checkpointer=None, _stor
                 saved = store.get(tid) if hasattr(store, "get") else None
                 if not saved:
                     return {"decision": "failed", "trace": [], "reason": "checkpoint_missing"}
-                out = run_all(saved.get("expense", {}), saved)
+                out = run_all(saved.get("expense", {}), saved, tid)
+                if out.get("_loop_failed"):
+                    trace = list(out.get("trace", [])) + ["failed"]
+                    _save(tid, out, out.get("expense", {}))
+                    return {"decision": "failed", "state": out, "trace": trace,
+                            "reason": "loop_detected"}
                 decision = "human_review" if out.get("need_human") else "auto_approve"
                 trace = list(out.get("trace", [])) + [decision]
                 _save(tid, out, out.get("expense", {}))
@@ -224,9 +342,14 @@ def build_expense_graph(policy_threshold: float = 5000, checkpointer=None, _stor
             if saved and saved.get("expense") == exp:
                 base = saved
             else:
+                _reset_guard_for_new_expense(tid)
                 base = {"expense": exp, "policy_threshold": policy_threshold, "trace": [], "_done": []}
-            out = run_all(exp, base)
+            out = run_all(exp, base, tid)
             _save(tid, out, exp)
+            if out.get("_loop_failed"):
+                return {"decision": "failed", "state": out,
+                        "trace": list(out.get("trace", [])) + ["failed"],
+                        "reason": "loop_detected"}
             if out.get("need_human"):
                 if durable:
                     _ensure_pending(tid, exp)

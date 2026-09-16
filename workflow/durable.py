@@ -49,8 +49,9 @@ def _call_once(func, timeout: float):
         return fut.result(timeout=timeout)
 
 
-def run_with_retry(key: str, func, store: IdempotencyStore | None = None, retries: int = 3, timeout: float = 5.0, backoff: float = 0.0):
-    # 测试用 backoff=0.0 保持快速；生产调用传 backoff=1.0 得到 1s/2s/4s 指数退避。
+def run_with_retry(key: str, func, store: IdempotencyStore | None = None, retries: int = 3, timeout: float = 5.0, backoff: float = 1.0):
+    # Spec default backoff=1.0 → 1s/2s/4s 指数退避；测试需快速时显式传 backoff=0.0。
+    # Idempotency key format: f"{thread_id}:{node}" (e.g. "task-9:fetch_expense").
     if store is not None:
         cached = store.get(key)
         if cached is not None:
