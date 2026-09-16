@@ -2,6 +2,7 @@
 import dataclasses
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+from observability.tracing import Tracer
 from .state import AgentState
 from .planner import default_planner, default_executor
 
@@ -26,6 +27,13 @@ def run(
                      "observations": state.observations, "tool_calls": state.tool_calls,
                      "rag": state.context.get("rag", []), "system": state.context.get("system", "")})
                 state.context["context_report"] = report
+                trace_id = state.context.get("trace_id")
+                if trace_id:
+                    try:
+                        _T = Tracer()
+                        _T.log_event(trace_id, "context_assemble", report)
+                    except Exception:
+                        pass
                 # planner view is read-only by contract; collections copied defensively
                 planner_state = dataclasses.replace(
                     state, messages=[{"role": m.get("role", "user"), "content": m.get("content", "")}
