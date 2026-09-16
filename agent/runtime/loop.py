@@ -94,7 +94,17 @@ def run(
                     context=dict(inner.context))
             except Exception:
                 planner_state = inner
-        plan = planner(planner_state)
+        try:
+            plan = planner(planner_state)
+        except Exception as e:
+            inner.plan = None
+            inner.status = "failed"
+            inner.answer = f"planner_error: {e}"
+            _record_tokens(task, llm_messages or inner.messages, "")
+            task.transition("failed", "planner_error")
+            _emit_status(task, "planner_error")
+            inner.context["agent_task"] = task
+            return inner
         inner.plan = plan
 
         if plan.get("action") == "finish":
@@ -107,7 +117,16 @@ def run(
 
         if plan.get("action") == "call_tool":
             _record_tokens(task, llm_messages if assembler else inner.messages, "")
-            obs = executor(plan, inner)
+            try:
+                obs = executor(plan, inner)
+            except Exception as e:
+                inner.status = "failed"
+                inner.answer = f"executor_error: {e}"
+                _record_tokens(task, llm_messages or inner.messages, "")
+                task.transition("failed", "executor_error")
+                _emit_status(task, "executor_error")
+                inner.context["agent_task"] = task
+                return inner
             inner.observations.append(obs)
             inner.messages.append({"role": "observation", "content": str(obs)})
             inner.iteration += 1
@@ -115,12 +134,14 @@ def run(
 
         inner.status = "failed"
         inner.answer = f"unknown action: {plan.get('action')}"
+        _record_tokens(task, llm_messages or inner.messages, "")
         task.transition("failed", "unknown_action")
         _emit_status(task, "unknown_action")
         break
     else:
         inner.status = "failed"
         inner.answer = "max_iterations exceeded"
+        _record_tokens(task, llm_messages or inner.messages, "")
         task.transition("failed", "max_iterations")
         _emit_status(task, "max_iterations")
 

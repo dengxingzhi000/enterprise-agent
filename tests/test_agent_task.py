@@ -112,3 +112,51 @@ def test_loop_records_tokens_each_round():
     assert at.token_usage["input"] >= 1
     assert at.token_usage["output"] >= 0
     assert at.cost >= 0
+
+
+def test_loop_planner_exception_marks_failed():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    def planner(state):
+        raise RuntimeError("boom")
+    def executor(plan, state):
+        return {"tool": "noop", "result": "x"}
+    s = AgentState(task="x")
+    result = run(s, planner=planner, executor=executor)
+    at = result.context.get("agent_task")
+    assert at is not None
+    assert at.status == "failed"
+    assert at.history[-1]["reason"] == "planner_error"
+    assert "planner_error" in result.answer
+    assert "boom" in result.answer
+
+
+def test_loop_executor_exception_marks_failed():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    def planner(state):
+        return {"action": "call_tool", "tool": "noop", "args": {}}
+    def executor(plan, state):
+        raise RuntimeError("executor_boom")
+    s = AgentState(task="x")
+    result = run(s, planner=planner, executor=executor)
+    at = result.context.get("agent_task")
+    assert at is not None
+    assert at.status == "failed"
+    assert at.history[-1]["reason"] == "executor_error"
+    assert "executor_error" in result.answer
+    assert "executor_boom" in result.answer
+
+
+def test_loop_records_tokens_on_unknown_action_failure():
+    from agent.runtime.state import AgentState
+    from agent.runtime.loop import run
+    def planner(state):
+        return {"action": "weird_unknown_action"}
+    def executor(plan, state):
+        return None
+    s = run(AgentState(task="record-unknown"), planner=planner, executor=executor)
+    at = s.context.get("agent_task")
+    assert at.status == "failed"
+    assert at.history[-1]["reason"] == "unknown_action"
+    assert at.token_usage["input"] >= 1
