@@ -1,5 +1,6 @@
-"""SCM HTTP封装：5s超时 / 401刷token重试1次 / 结果截断调用方做。"""
+"""SCM HTTP封装：5s超时 / 401刷token重试1次 / 5xx/连接错重试1次 / 结果截断调用方做。"""
 import os
+import time as _time
 import uuid
 
 import httpx
@@ -8,12 +9,14 @@ from .auth import TokenCache
 
 
 class ScmClient:
-    def __init__(self, gateway_url="", auth_url="", username="", password="", timeout=5):
+    def __init__(self, gateway_url="", auth_url="", username="", password="", timeout=5, backoff_seconds=None):
         self.gateway_url = gateway_url or os.environ.get("SCM_GATEWAY_URL", "")
         self.auth_url = auth_url or os.environ.get("SCM_AUTH_URL", "")
         self.username = username or os.environ.get("SCM_USERNAME", "")
         self.password = password or os.environ.get("SCM_PASSWORD", "")
         self.timeout = int(os.environ.get("SCM_TIMEOUT_SECONDS", str(timeout)))
+        self.backoff_seconds = backoff_seconds if backoff_seconds is not None else float(
+            os.environ.get("SCM_RETRY_BACKOFF_SECONDS", "0.3"))
         self._tokens = TokenCache()
 
     def _send(self, method: str, path: str, **kw):
@@ -45,10 +48,31 @@ class ScmClient:
             pass
 
     def get(self, path: str, params: dict | None = None):
-        code, body = self._send("GET", path, params=params or {})
+        params = params or {}
+        try:
+            code, body = self._send("GET", path, params=params)
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            if self.backoff_seconds > 0:
+                _time.sleep(self.backoff_seconds)
+            try:
+                code, body = self._send("GET", path, params=params)
+            except (httpx.ConnectError, httpx.TimeoutException) as e2:
+                return (0, {"error": f"transport after retry: {e2}", "path": path})
+            return (code, body)
+
+        if 500 <= code < 600:
+            if self.backoff_seconds > 0:
+                _time.sleep(self.backoff_seconds)
+            code, body = self._send("GET", path, params=params)
+            if code == 0 or 500 <= code < 600:
+                return (0, {"error": f"5xx after retry: {code}", "path": path})
+
         if code == 401:
             self._login()
-            code, body = self._send("GET", path, params=params or {})
+            try:
+                code, body = self._send("GET", path, params=params)
+            except (httpx.ConnectError, httpx.TimeoutException) as e2:
+                return (0, {"error": f"transport after 401-retry: {e2}", "path": path})
         return (code, body)
 
     @classmethod
