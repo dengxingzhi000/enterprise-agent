@@ -1,4 +1,6 @@
 """运维四件套 Mock: metrics/logs/git/db。返回确定性假数据，先跑通Loop。"""
+import logging
+
 from .registry import Registry, Tool
 
 
@@ -38,4 +40,9 @@ def build_default_registry() -> Registry:
     reg.register(Tool("git.diff", "查最近提交", _git_diff))
     reg.register(Tool("db.query", "查业务数据(mock)", _db_query))
     reg.register(Tool("knowledge.search", "查企业制度/手册(RAG)", _knowledge_search))
+    try:
+        from integrations.scm.tools import register_scm_tools
+        register_scm_tools(reg)
+    except Exception as e:
+        logging.getLogger(__name__).warning("scm tools auto-register failed: %s", e, exc_info=True)
     return reg

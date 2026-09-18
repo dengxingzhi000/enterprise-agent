@@ -6,7 +6,7 @@
 
 **Architecture:** FastAPI Gateway → 自研 Agent Runtime (Planner/Executor loop) → Tool Registry → MCP/DB/RAG → Policy/HITL → Workflow → Observability。先自研，后 LangGraph 重构。
 
-**Tech Stack:** Python 3.12+, FastAPI, Pydantic, DeepSeek (OpenAI兼容), Postgres/pgvector + Redis (远程192.168.80.156), Docker(后补), OpenTelemetry/Prometheus(后补)。
+**Tech Stack:** Python 3.13+, FastAPI, Pydantic, DeepSeek (OpenAI兼容), Postgres/pgvector + Redis (远程192.168.80.156), Docker(后补), OpenTelemetry/Prometheus(后补)。
 
 ---
 
