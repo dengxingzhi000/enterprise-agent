@@ -118,3 +118,33 @@ def test_to_scm_tenant_unknown_warns(monkeypatch, recwarn):
     scm_t = auth.to_scm_tenant("t9")
     assert scm_t == "t9"
     assert any("no scm tenant mapping" in str(w.message).lower() for w in recwarn.list)
+
+
+def test_scm_supplier_get_registered():
+    """Phase 2 #6: scm.supplier.get 必须在 registry 里。"""
+    from agent.tools.registry import Registry
+    from integrations.scm.tools import register_scm_tools
+    reg = Registry()
+    register_scm_tools(reg)
+    assert "scm.supplier.get" in reg.list_tools()
+
+
+def test_scm_supplier_get_read_allowed():
+    """Phase 2 #6 联动：PolicyEngine allow。"""
+    from security.policy import PolicyEngine
+    p = PolicyEngine()
+    d = p.check({"tenant_id": "t1", "role": "employee"},
+                "scm.supplier.get", {"supplier_id": "SP-001", "tenant_id": "t1"})
+    assert d["decision"] == "allow"
+
+
+def test_scm_supplier_get_mock_payload():
+    """Phase 2 #6: 离线 mock 返回 supplier 风险字段。"""
+    from agent.tools.registry import Registry
+    from integrations.scm.tools import register_scm_tools
+    reg = Registry()
+    register_scm_tools(reg)
+    out = reg.call("scm.supplier.get", {"supplier_id": "SP-001", "tenant_id": "t1"})
+    s = str(out)
+    assert "SP-001" in s
+    assert "credit_score" in s or "rating" in s
