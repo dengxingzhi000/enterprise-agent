@@ -223,3 +223,70 @@ def test_supplier_call_failure_does_not_break_review(monkeypatch):
     out = scenarios.review_contract({"amount": 50000, "clauses": [], "supplier_id": "SP-001"})
     assert out["decision"] == "human_review"
     assert "暂不可用" in out["opinion"] or "supplier" in out["opinion"].lower()
+
+
+def test_client_emits_trace_event():
+    """Phase 3 #7: 设 contextvar 时 _send 在前后各发一个 scm_call/scm_result 事件。"""
+    from observability.tracing import Tracer
+    from integrations.scm.client import ScmClient, scm_trace_id
+    Tracer._shared = Tracer()
+    tid = "tr-v2-surface-test"
+    token = scm_trace_id.set(tid)
+    try:
+        assert scm_trace_id.get() == tid
+        events = Tracer._shared._traces.get(tid, {}).get("events", [])
+        assert events == []
+    finally:
+        scm_trace_id.reset(token)
+
+
+def test_client_log_event_fires_on_send(monkeypatch):
+    """Phase 3 #7: 设 contextvar 时 _send 发 log_event。"""
+    from observability.tracing import Tracer
+    from integrations.scm.client import ScmClient, scm_trace_id
+    Tracer._shared = Tracer()
+    tid = "tr-send-test"
+    token = scm_trace_id.set(tid)
+    try:
+        captured = []
+        orig = Tracer._shared.log_event
+        def fake_log(trace_id, stage, data):
+            captured.append((trace_id, stage, data))
+            return orig(trace_id, stage, data)
+        Tracer._shared.log_event = fake_log
+        class _FakeResp:
+            status_code = 200
+            text = '{"ok": true}'
+            def json(self):
+                return {"ok": True}
+        monkeypatch.setattr("integrations.scm.client.httpx.request",
+                            lambda method, url, **kw: _FakeResp())
+        c = ScmClient(gateway_url="http://x", auth_url="http://a",
+                      username="u", password="p", timeout=5)
+        c.get("/api/x")
+        stages = [s for _, s, _ in captured]
+        assert "scm_call" in stages
+        assert "scm_result" in stages
+    finally:
+        scm_trace_id.reset(token)
+
+
+def test_client_no_trace_event_when_contextvar_unset(monkeypatch):
+    """Phase 3 #7: contextvar 未设时 _send 不应发 log_event（容错）。"""
+    from observability.tracing import Tracer
+    from integrations.scm.client import ScmClient, scm_trace_id
+    Tracer._shared = Tracer()
+    assert scm_trace_id.get() is None
+    captured = []
+    orig = Tracer._shared.log_event
+    def fake_log(trace_id, stage, data):
+        captured.append((trace_id, stage))
+        return orig(trace_id, stage, data)
+    Tracer._shared.log_event = fake_log
+    def fake_send(self, method, path, **kw):
+        return (200, {"ok": True})
+    monkeypatch.setattr(ScmClient, "_send", fake_send)
+    c = ScmClient(gateway_url="http://x", auth_url="http://a",
+                  username="u", password="p", timeout=5)
+    c.get("/api/x")
+    assert captured == []

@@ -1,11 +1,18 @@
 """SCM HTTP封装：5s超时 / 401刷token重试1次 / 5xx/连接错重试1次 / 结果截断调用方做。"""
+import contextvars
 import os
 import time as _time
 import uuid
 
 import httpx
 
+from observability.tracing import Tracer
+
 from .auth import TokenCache
+
+scm_trace_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "scm_trace_id", default=None
+)
 
 
 class ScmClient:
@@ -26,11 +33,25 @@ class ScmClient:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         headers.setdefault("X-Request-Id", str(uuid.uuid4()))
+        tid = scm_trace_id.get()
+        if tid and Tracer._shared is not None:
+            try:
+                Tracer._shared.log_event(tid, "scm_call",
+                                         {"method": method, "path": path})
+            except Exception:
+                pass
         r = httpx.request(method, url, headers=headers, timeout=self.timeout, **kw)
         try:
             body = r.json()
         except Exception:
             body = {"text": r.text[:2000]}
+        if tid and Tracer._shared is not None:
+            try:
+                Tracer._shared.log_event(tid, "scm_result",
+                                         {"method": method, "path": path,
+                                          "code": r.status_code})
+            except Exception:
+                pass
         return (r.status_code, body)
 
     def _login(self):
