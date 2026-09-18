@@ -192,3 +192,34 @@ def test_run_it_ops_falls_back_to_knowledge_search(monkeypatch):
     # report 仍是合法的报告（不应包含 sentinel error 字符串）
     assert "RuntimeError" not in out["report"]
     assert "metrics down" not in out["report"]
+
+
+def test_review_contract_uses_supplier():
+    """Phase 2 #6: risk 命中时 opinion 含 supplier 信息 + trace 含 scm.supplier.get。"""
+    from workflow.scenarios import review_contract
+    out = review_contract({"amount": 50000, "clauses": [], "supplier_id": "SP-001"})
+    assert out["decision"] == "human_review"
+    assert "supplier" in out["opinion"].lower() or "SP-001" in out["opinion"]
+    assert "scm.supplier.get" in out["trace"]
+
+
+def test_review_contract_no_supplier_id_skips_hook():
+    """Phase 2 #6: 缺 supplier_id 时不调 scm，opinion 不含 supplier 字段。"""
+    from workflow.scenarios import review_contract
+    out = review_contract({"amount": 50000, "clauses": []})
+    assert "scm.supplier.get" not in out["trace"]
+
+
+def test_supplier_call_failure_does_not_break_review(monkeypatch):
+    """Phase 2 #6: scm.supplier.get 失败时 review_contract 仍返回原 decision。"""
+    from agent.tools.registry import Registry
+    from workflow import scenarios
+    orig_call = Registry.call
+    def fake_call(self, name, args):
+        if name == "scm.supplier.get":
+            raise RuntimeError("scm down")
+        return orig_call(self, name, args)
+    monkeypatch.setattr(Registry, "call", fake_call)
+    out = scenarios.review_contract({"amount": 50000, "clauses": [], "supplier_id": "SP-001"})
+    assert out["decision"] == "human_review"
+    assert "暂不可用" in out["opinion"] or "supplier" in out["opinion"].lower()
