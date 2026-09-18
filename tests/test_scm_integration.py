@@ -25,3 +25,21 @@ def test_401_refresh_retry(monkeypatch):
     assert code == 200
     assert body["status"] == "PAID"
     assert calls["n"] == 2
+
+
+def test_cross_tenant_denied():
+    from security.policy import PolicyEngine
+    p = PolicyEngine()
+    d = p.check({"tenant_id": "t1", "role": "admin"}, "scm.order.get", {"tenant_id": "t2"})
+    assert d["decision"] == "deny"
+
+
+def test_offline_fallback():
+    import os
+    os.environ.pop("SCM_GATEWAY_URL", None)
+    from agent.tools.registry import Registry
+    from integrations.scm.tools import register_scm_tools
+    reg = Registry()
+    register_scm_tools(reg)
+    out = reg.call("scm.order.get", {"order_no": "20260915001", "tenant_id": "t1"})
+    assert "20260915001" in str(out)
