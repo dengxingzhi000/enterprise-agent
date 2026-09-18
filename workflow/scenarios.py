@@ -9,17 +9,31 @@ def review_contract(contract: dict) -> dict:
     from knowledge.seed import get_default_store
     amount = contract.get("amount", 0)
     clauses = contract.get("clauses", [])
+    supplier_id = contract.get("supplier_id", "")
     hits = get_default_store().search("合同审批 赔偿 预付款", tenant_id="t1",
                                       allowed_permissions=["employee", "finance", "manager", "admin"])
     policy_ref = hits[0].text[:80] if hits else "超阈值需审批"
     risky = amount > 10000 or any(any(r in c for r in RISKY_CLAUSES) for c in clauses)
-    if risky:
-        return {"decision": "human_review",
-                "opinion": f"风险条款需人审：{clauses}；金额{amount}。依据：{policy_ref}",
-                "trace": ["retrieve_policy", "judge_rule", "human_review"]}
-    return {"decision": "auto_approve",
-            "opinion": f"标准小额合同自动通过：金额{amount}",
-            "trace": ["retrieve_policy", "judge_rule", "auto_approve"]}
+    if not risky:
+        return {"decision": "auto_approve",
+                "opinion": f"标准小额合同自动通过：金额{amount}",
+                "trace": ["retrieve_policy", "judge_rule", "auto_approve"]}
+
+    trace = ["retrieve_policy", "judge_rule"]
+    supplier_info = "(supplier 信息暂不可用)"
+    if supplier_id:
+        try:
+            from agent.tools.builtin import build_default_registry
+            reg = build_default_registry()
+            sup_out = reg.call("scm.supplier.get", {"supplier_id": supplier_id, "tenant_id": "t1"})
+            supplier_info = str(sup_out)
+            trace.append("scm.supplier.get")
+        except Exception as e:
+            logging.getLogger(__name__).warning("scm.supplier.get failed: %r", e)
+
+    return {"decision": "human_review",
+            "opinion": f"风险条款需人审：{clauses}；金额{amount}；供应商{supplier_info}。依据：{policy_ref}",
+            "trace": trace + ["human_review"]}
 
 
 def analyze_sales(question: str, tenant_id: str = "t1") -> dict:
