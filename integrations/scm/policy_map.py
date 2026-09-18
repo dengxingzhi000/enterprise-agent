@@ -1,5 +1,10 @@
 """SCM读写分级：读=allow，写=need_approval，未知=deny。"""
-SCM_READ_TOOLS = {"scm.order.get", "scm.inventory.query", "scm.sales.report"}
+SCM_READ_TOOLS = {
+    "scm.order.get",
+    "scm.inventory.query",
+    "scm.sales.report",
+    "scm.supplier.get",  # v2 Phase 2: 合同 supplier 风险查询
+}
 SCM_WRITE_TOOLS = {"scm.purchase.create", "scm.order.cancel", "scm.stock.adjust"}
 
 
