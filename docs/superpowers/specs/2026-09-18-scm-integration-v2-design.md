@@ -22,7 +22,7 @@ v1（PR #16）已交付 `integrations/scm/` 的 3 只读口 + Policy 分支 + �
 
 ```
 Phase 1 — Foundation  (PR: feat/scm-integration-v2-foundation)
-  integrations/scm/tools.py        注册 scm.order.cancel + scm.stock.adject + 修 tools.py 占位
+  integrations/scm/tools.py        注册 scm.order.cancel + scm.stock.adjust + 修 tools.py 占位
   integrations/scm/client.py      503/504/ConnectError 重试 1 次（仅 GET，0.3s 退避）
   integrations/scm/auth.py        SCM_TENANT_MAP 坏 JSON / 空 dict → warning + 回退默认
   tests/test_scm_integration_v2.py  RED → GREEN
