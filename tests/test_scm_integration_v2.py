@@ -91,3 +91,30 @@ def test_5xx_give_up_after_retry(monkeypatch):
     assert "error" in body
     assert "5xx" in body["error"]
     assert calls["n"] == 2
+
+
+def test_tenant_map_warning_on_bad_json(monkeypatch, recwarn):
+    """Phase 1 #8: 坏 JSON → warning + 默认 map。"""
+    monkeypatch.setenv("SCM_TENANT_MAP", "{not valid json")
+    from integrations.scm import auth
+    m = auth.load_tenant_map()
+    assert m == {"t1": "tenant_001"}
+    assert any("SCM_TENANT_MAP" in str(w.message) for w in recwarn.list)
+
+
+def test_tenant_map_warning_on_empty(monkeypatch, recwarn):
+    """Phase 1 #8: 空 dict → warning + 默认。"""
+    monkeypatch.setenv("SCM_TENANT_MAP", "{}")
+    from integrations.scm import auth
+    m = auth.load_tenant_map()
+    assert m == {"t1": "tenant_001"}
+    assert any("SCM_TENANT_MAP" in str(w.message) for w in recwarn.list)
+
+
+def test_to_scm_tenant_unknown_warns(monkeypatch, recwarn):
+    """Phase 1 #8: agent tenant 不在 map 中 → warning + 透传。"""
+    monkeypatch.setenv("SCM_TENANT_MAP", '{"t2":"tenant_002"}')
+    from integrations.scm import auth
+    scm_t = auth.to_scm_tenant("t9")
+    assert scm_t == "t9"
+    assert any("no scm tenant mapping" in str(w.message).lower() for w in recwarn.list)
