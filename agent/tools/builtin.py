@@ -44,5 +44,5 @@ def build_default_registry() -> Registry:
         from integrations.scm.tools import register_scm_tools
         register_scm_tools(reg)
     except Exception as e:
-        logging.getLogger(__name__).warning("scm tools auto-register failed: %s", e)
+        logging.getLogger(__name__).warning("scm tools auto-register failed: %s", e, exc_info=True)
     return reg
