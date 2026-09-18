@@ -66,3 +66,20 @@ def test_scm_write_needs_approval():
     p = PolicyEngine()
     d = p.check({"tenant_id": "t1", "role": "admin"}, "scm.purchase.create", {"tenant_id": "t1"})
     assert d["decision"] == "need_approval"
+
+
+def test_scm_sales_fallback_true_retry(monkeypatch):
+    from agent.tools.registry import Registry
+    orig_call = Registry.call
+    sentinel = "SENSITIVE_ERR_XYZ123"
+    def fake_call(self, name, args):
+        if name == "scm.sales.report":
+            raise RuntimeError(sentinel)
+        return orig_call(self, name, args)
+    monkeypatch.setattr(Registry, "call", fake_call)
+    from workflow.scenarios import analyze_sales
+    out = analyze_sales("近7天为什么下降")
+    assert sentinel not in out["report"]
+    assert "knowledge.search" in out["trace"]
+    assert "scm.sales.report" not in out["trace"]
+    assert out["report"]

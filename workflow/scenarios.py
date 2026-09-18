@@ -19,19 +19,25 @@ def review_contract(contract: dict) -> dict:
             "trace": ["retrieve_policy", "judge_rule", "auto_approve"]}
 
 
-def analyze_sales(question: str) -> dict:
+def analyze_sales(question: str, tenant_id: str = "t1") -> dict:
+    import logging
     from agent.tools.builtin import build_default_registry
     reg = build_default_registry()
     trace = []
     try:
         if "scm.sales.report" in reg.list_tools():
-            sales = reg.call("scm.sales.report", {"range": "7d", "tenant_id": "t1"})
+            # range 保持 "7d" 默认；question 解析超出首版范围，暂不做动态解析。
+            sales = reg.call("scm.sales.report", {"range": "7d", "tenant_id": tenant_id})
             trace.append("scm.sales.report")
         else:
-            sales = reg.call("knowledge.search", {"query": question, "tenant_id": "t1"})
+            sales = reg.call("knowledge.search", {"query": question, "tenant_id": tenant_id})
             trace.append("knowledge.search")
     except Exception as e:
-        sales = f"sales fallback: {e}"
+        logging.getLogger(__name__).warning("scm.sales.report failed: %r", e)
+        try:
+            sales = reg.call("knowledge.search", {"query": question, "tenant_id": tenant_id})
+        except Exception:
+            sales = "销售聚合暂不可用，已用本地知识库代替"
         trace.append("knowledge.search")
     metrics = reg.call("metrics.get", {"service": "mall"})
     rows = reg.call("db.query", {"scope": "self"})
