@@ -369,3 +369,91 @@ def test_runtime_transitions_to_paused_on_need_approval():
     assert final.status == "paused"
     assert final.context.get("pause_reason") == "need_approval"
     assert final.context.get("approval_id", "").startswith("apr-")
+
+
+def test_chat_payload_surfaces_approval_id(monkeypatch):
+    """Phase 3 #5 链路第三步: /chat 在 status=paused 时 payload 含 approval_id。"""
+    from fastapi.testclient import TestClient
+    from apps.api.main import app
+    from agent.runtime import loop as loop_mod
+    from agent.runtime.state import AgentState
+
+    def fake_run(state, planner=None, **kw):
+        state.status = "paused"
+        state.answer = "need approval apr-99: scm.purchase.create pending human review"
+        state.context["pause_reason"] = "need_approval"
+        state.context["approval_id"] = "apr-99"
+        state.context["approval_tool"] = "scm.purchase.create"
+        state.context["approval_args"] = {"sku": "X", "tenant_id": "t1"}
+        return state
+    monkeypatch.setattr(loop_mod, "run", fake_run)
+    from infrastructure.pg import connector as conn_mod
+    monkeypatch.setattr(conn_mod, "get_connector", lambda: None)
+    from infrastructure.pg import schema as schema_mod
+    monkeypatch.setattr(schema_mod, "ensure_schema", lambda c: None)
+
+    c = TestClient(app)
+    r = c.post("/chat", json={"message": "buy X", "tenant_id": "t1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "paused"
+    assert body["approval_id"] == "apr-99"
+    assert body["approval_tool"] == "scm.purchase.create"
+    assert body["approval_args"] == {"sku": "X", "tenant_id": "t1"}
+
+
+def test_no_approval_field_when_not_paused(monkeypatch):
+    """Phase 3 #5 联动: 普通 done 状态不含 approval_id。"""
+    from fastapi.testclient import TestClient
+    from apps.api.main import app
+    from agent.runtime import loop as loop_mod
+    from agent.runtime.state import AgentState
+
+    def fake_run(state, planner=None, **kw):
+        state.status = "done"
+        state.answer = "OK"
+        return state
+    monkeypatch.setattr(loop_mod, "run", fake_run)
+    from infrastructure.pg import connector as conn_mod
+    monkeypatch.setattr(conn_mod, "get_connector", lambda: None)
+    from infrastructure.pg import schema as schema_mod
+    monkeypatch.setattr(schema_mod, "ensure_schema", lambda c: None)
+
+    c = TestClient(app)
+    r = c.post("/chat", json={"message": "hi", "tenant_id": "t1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "done"
+    assert "approval_id" not in body
+
+
+def test_chat_end_to_end_paused_with_aid(monkeypatch):
+    """真集成测试: Planner emits call_tool(高风险) -> guarded_executor -> paused -> /chat surfaces aid."""
+    from fastapi.testclient import TestClient
+    from apps.api.main import app
+    from agent.runtime.state import AgentState
+
+    # mock planner: emit call_tool for scm.purchase.create (high-risk)
+    def fake_planner(state):
+        return {"action": "call_tool", "tool": "scm.purchase.create",
+                "args": {"sku": "X", "tenant_id": state.context.get("tenant_id", "t1")}}
+
+    # Patch the planner builder (the chat() function calls build_deepseek_planner)
+    import apps.api.main as main_mod
+    monkeypatch.setattr(main_mod, "build_deepseek_planner",
+                        lambda client, model: fake_planner)
+    # Schema mocks for offline
+    from infrastructure.pg import connector as conn_mod
+    monkeypatch.setattr(conn_mod, "get_connector", lambda: None)
+    from infrastructure.pg import schema as schema_mod
+    monkeypatch.setattr(schema_mod, "ensure_schema", lambda c: None)
+
+    c = TestClient(app)
+    r = c.post("/chat", json={"message": "buy X", "tenant_id": "t1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "paused"
+    assert body.get("approval_id", "").startswith("apr-")
+    assert body.get("approval_tool") == "scm.purchase.create"
+    assert body.get("approval_args") == {"sku": "X", "tenant_id": "t1"}
+    assert "trace_id" in body
