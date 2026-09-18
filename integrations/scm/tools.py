@@ -28,8 +28,11 @@ def register_scm_tools(registry, client=None):
         registry.register(Tool("scm.order.get", "查SCM订单(只读)", _mock_order))
         registry.register(Tool("scm.inventory.query", "查SCM库存(只读)", _mock_inventory))
         registry.register(Tool("scm.sales.report", "查销售聚合(只读)", _mock_sales))
-        # 写口占位：直接返回need-approval提示，不发请求
-        registry.register(Tool("scm.purchase.create", "建采购单(高风险,占位)", lambda a: "need approval: scm.purchase.create pending human review"))
+        # 写口占位：返回need-approval字符串。实际不会被调用，因为 guarded_executor
+        # 在 PolicyEngine.need_approval 时已拦截；保留仅为防御 Policy 配置失误。
+        registry.register(Tool("scm.purchase.create", "建采购单(占位, 走HITL)", lambda a: "need approval: scm.purchase.create pending human review"))
+        registry.register(Tool("scm.order.cancel", "取消SCM订单(占位, 走HITL)", lambda a: "need approval: scm.order.cancel pending human review"))
+        registry.register(Tool("scm.stock.adjust", "调整SCM库存(占位, 走HITL)", lambda a: "need approval: scm.stock.adjust pending human review"))
         return registry
     c = client or ScmClient.from_env()
 
@@ -60,7 +63,11 @@ def register_scm_tools(registry, client=None):
     registry.register(Tool("scm.order.get", "查SCM订单(只读)", _order_get))
     registry.register(Tool("scm.inventory.query", "查SCM库存(只读)", _inv_query))
     registry.register(Tool("scm.sales.report", "查销售聚合(只读)", _sales_report_alias(_sales)))
-    registry.register(Tool("scm.purchase.create", "建采购单(高风险,占位)", lambda a: "need approval: scm.purchase.create pending human review"))
+    # 写口占位：返回need-approval字符串。实际不会被调用，因为 guarded_executor
+    # 在 PolicyEngine.need_approval 时已拦截；保留仅为防御 Policy 配置失误。
+    registry.register(Tool("scm.purchase.create", "建采购单(占位, 走HITL)", lambda a: "need approval: scm.purchase.create pending human review"))
+    registry.register(Tool("scm.order.cancel", "取消SCM订单(占位, 走HITL)", lambda a: "need approval: scm.order.cancel pending human review"))
+    registry.register(Tool("scm.stock.adjust", "调整SCM库存(占位, 走HITL)", lambda a: "need approval: scm.stock.adjust pending human review"))
     return registry
 
 
