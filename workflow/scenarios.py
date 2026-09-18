@@ -22,9 +22,20 @@ def review_contract(contract: dict) -> dict:
 def analyze_sales(question: str) -> dict:
     from agent.tools.builtin import build_default_registry
     reg = build_default_registry()
+    trace = []
+    try:
+        if "scm.sales.report" in reg.list_tools():
+            sales = reg.call("scm.sales.report", {"range": "7d", "tenant_id": "t1"})
+            trace.append("scm.sales.report")
+        else:
+            sales = reg.call("knowledge.search", {"query": question, "tenant_id": "t1"})
+            trace.append("knowledge.search")
+    except Exception as e:
+        sales = f"sales fallback: {e}"
+        trace.append("knowledge.search")
     metrics = reg.call("metrics.get", {"service": "mall"})
     rows = reg.call("db.query", {"scope": "self"})
-    knowledge = reg.call("knowledge.search", {"query": question, "tenant_id": "t1"})
-    report = (f"销售下降分析报告：{question}\n- 指标：{metrics}\n- 数据：{rows}\n"
-              f"- 业务规则：{knowledge}\n- 初步判断：支付超时导致下单失败，需按运维手册排查。")
-    return {"report": report, "trace": ["metrics.get", "db.query", "knowledge.search"]}
+    trace += ["metrics.get", "db.query"]
+    report = (f"销售下降分析报告：{question}\n- 销售聚合：{sales}\n- 指标：{metrics}\n- 数据：{rows}\n"
+              f"- 初步判断：支付超时导致下单失败，需按运维手册排查。")
+    return {"report": report, "trace": trace}

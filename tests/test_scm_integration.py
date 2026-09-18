@@ -50,3 +50,19 @@ def test_scm_read_allowed():
     p = PolicyEngine()
     d = p.check({"tenant_id": "t1", "role": "employee"}, "scm.order.get", {"tenant_id": "t1"})
     assert d["decision"] == "allow"
+
+
+def test_analyze_sales_prefers_scm():
+    import os
+    os.environ.pop("SCM_GATEWAY_URL", None)
+    from workflow.scenarios import analyze_sales
+    out = analyze_sales("近7天为什么下降")
+    assert "report" in out
+    assert "trace" in out and len(out["trace"]) >= 1
+
+
+def test_scm_write_needs_approval():
+    from security.policy import PolicyEngine
+    p = PolicyEngine()
+    d = p.check({"tenant_id": "t1", "role": "admin"}, "scm.purchase.create", {"tenant_id": "t1"})
+    assert d["decision"] == "need_approval"

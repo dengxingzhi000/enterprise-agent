@@ -1,4 +1,6 @@
 """运维四件套 Mock: metrics/logs/git/db。返回确定性假数据，先跑通Loop。"""
+import logging
+
 from .registry import Registry, Tool
 
 
@@ -41,6 +43,6 @@ def build_default_registry() -> Registry:
     try:
         from integrations.scm.tools import register_scm_tools
         register_scm_tools(reg)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning("scm tools auto-register failed: %s", e)
     return reg
