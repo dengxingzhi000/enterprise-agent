@@ -129,6 +129,15 @@ def run(
                 return inner
             inner.observations.append(obs)
             inner.messages.append({"role": "observation", "content": str(obs)})
+
+            # v2 Phase 3: HITL pause — need_approval observation breaks the loop.
+            obs_result = str(obs.get("result", ""))
+            if obs_result.startswith("need approval"):
+                inner.status = "paused"
+                task.transition("paused", "need_approval")
+                _emit_status(task, "need_approval")
+                break
+
             inner.iteration += 1
             continue
 
