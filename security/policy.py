@@ -27,4 +27,13 @@ class PolicyEngine:
                 return {"decision": "allow", "reason": "all data"}
             return {"decision": "deny", "reason": f"role {role} cannot query scope={scope}"}
 
+        if tool.startswith("scm."):
+            from integrations.scm.policy_map import scm_policy_decision
+            dec = scm_policy_decision(tool)
+            if dec == "allow":
+                return {"decision": "allow", "reason": "scm low-risk read"}
+            if dec == "need_approval":
+                return {"decision": "need_approval", "reason": f"{tool} is high-risk"}
+            return {"decision": "deny", "reason": f"unknown tool {tool}"}
+
         return {"decision": "deny", "reason": f"unknown tool {tool}"}

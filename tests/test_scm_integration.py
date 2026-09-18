@@ -43,3 +43,10 @@ def test_offline_fallback():
     register_scm_tools(reg)
     out = reg.call("scm.order.get", {"order_no": "20260915001", "tenant_id": "t1"})
     assert "20260915001" in str(out)
+
+
+def test_scm_read_allowed():
+    from security.policy import PolicyEngine
+    p = PolicyEngine()
+    d = p.check({"tenant_id": "t1", "role": "employee"}, "scm.order.get", {"tenant_id": "t1"})
+    assert d["decision"] == "allow"
