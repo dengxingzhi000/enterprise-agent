@@ -329,3 +329,43 @@ def test_guarded_executor_no_context_write_on_deny():
                            approvals=ApprovalStore())
     assert "DENY" in str(out["result"])
     assert "pause_reason" not in state.context
+
+
+def test_runtime_transitions_to_paused_on_need_approval():
+    """Phase 3 #5 链路第二步: Runtime 收到 need approval observation 应 break + paused。"""
+    from agent.runtime.loop import run
+    from agent.runtime.state import AgentState
+    from agent.tools.executor import guarded_executor
+    from security.policy import PolicyEngine
+    from security.approval import ApprovalStore
+    from observability.tracing import Tracer
+
+    Tracer._shared = Tracer()
+
+    policy = PolicyEngine()
+    approvals = ApprovalStore()
+
+    # 默认 executor 不接 Policy/HITL，无法触发 need_approval；用 guarded_executor
+    # 模拟链路第一步的产出，对齐"Runtime 收到 need approval observation"语义。
+    def fake_executor(plan, state):
+        return guarded_executor(plan, state,
+                                user={"tenant_id": state.context.get("tenant_id", "t1"),
+                                      "role": "admin"},
+                                policy=policy,
+                                approvals=approvals)
+
+    plans = iter([
+        {"action": "call_tool", "tool": "scm.purchase.create",
+         "args": {"sku": "X", "tenant_id": "t1"}},
+        {"action": "finish", "answer": "should not reach"},
+    ])
+    def fake_planner(state):
+        return next(plans)
+    state = AgentState(task="buy something")
+    state.context["tenant_id"] = "t1"
+
+    final = run(state, planner=fake_planner, executor=fake_executor)
+
+    assert final.status == "paused"
+    assert final.context.get("pause_reason") == "need_approval"
+    assert final.context.get("approval_id", "").startswith("apr-")
