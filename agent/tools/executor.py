@@ -38,5 +38,11 @@ def guarded_executor(plan: dict, state, registry=None, user=None,
             aid = None
             if approvals is not None:
                 aid = approvals.request(user, tool, args)
+            ctx = getattr(state, "context", None)
+            if isinstance(ctx, dict):
+                ctx["pause_reason"] = "need_approval"
+                ctx["approval_id"] = aid
+                ctx["approval_tool"] = tool
+                ctx["approval_args"] = args
             return {"tool": tool, "result": f"need approval {aid}: {tool} pending human review"}
     return registry_executor(plan, state, registry=registry)
