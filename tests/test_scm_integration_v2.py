@@ -148,3 +148,47 @@ def test_scm_supplier_get_mock_payload():
     s = str(out)
     assert "SP-001" in s
     assert "credit_score" in s or "rating" in s
+
+
+def test_run_it_ops_basic():
+    """Phase 2 #4: run_it_ops 返回 report + trace，trace 含 metrics + logs。"""
+    from workflow.scenarios import run_it_ops
+    out = run_it_ops("近7天为什么下降")
+    assert "report" in out
+    assert "trace" in out
+    assert "metrics.get" in out["trace"]
+    assert "logs.search" in out["trace"]
+
+
+def test_run_it_ops_extracts_order_no():
+    """Phase 2 #4: question 含订单号（如'O-1234567'）时 trace 加 scm.order.get。"""
+    from workflow.scenarios import run_it_ops
+    out = run_it_ops("订单 O-20260915001 支付超时")
+    assert "scm.order.get" in out["trace"]
+
+
+def test_run_it_ops_no_order_no_keeps_template():
+    """Phase 2 #4: 无订单号时 trace 不含 scm.order.get。"""
+    from workflow.scenarios import run_it_ops
+    out = run_it_ops("服务异常")
+    assert "scm.order.get" not in out["trace"]
+
+
+def test_run_it_ops_falls_back_to_knowledge_search(monkeypatch):
+    """Phase 2 #4 + spec §3.4 step 4: tool 异常 → 静默回退 knowledge.search。"""
+    from agent.tools.registry import Registry
+    orig_call = Registry.call
+    def fake_call(self, name, args):
+        if name == "metrics.get":
+            raise RuntimeError("metrics down")
+        if name == "logs.search":
+            raise RuntimeError("logs down")
+        return orig_call(self, name, args)
+    monkeypatch.setattr(Registry, "call", fake_call)
+    from workflow.scenarios import run_it_ops
+    out = run_it_ops("近7天为什么下降")
+    # knowledge.search 应该被调一次（metrics 失败时）+一次（logs 失败时）
+    assert out["trace"].count("knowledge.search") >= 2
+    # report 仍是合法的报告（不应包含 sentinel error 字符串）
+    assert "RuntimeError" not in out["report"]
+    assert "metrics down" not in out["report"]
