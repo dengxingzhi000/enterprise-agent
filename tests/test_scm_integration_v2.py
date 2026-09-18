@@ -290,3 +290,42 @@ def test_client_no_trace_event_when_contextvar_unset(monkeypatch):
                   username="u", password="p", timeout=5)
     c.get("/api/x")
     assert captured == []
+
+
+def test_guarded_executor_writes_context_on_need_approval():
+    """Phase 3 #5 链路第一步: need_approval 时 state.context 写入 pause 元数据。"""
+    from agent.tools.executor import guarded_executor
+    from agent.runtime.state import AgentState
+    from security.policy import PolicyEngine
+    from security.approval import ApprovalStore
+    state = AgentState(task="t")
+    state.context["tenant_id"] = "t1"
+    plan = {"action": "call_tool", "tool": "scm.purchase.create",
+            "args": {"sku": "X", "tenant_id": "t1"}}
+    out = guarded_executor(plan, state,
+                           user={"tenant_id": "t1", "role": "admin"},
+                           policy=PolicyEngine(),
+                           approvals=ApprovalStore())
+    assert "need approval" in str(out["result"])
+    assert state.context.get("pause_reason") == "need_approval"
+    assert state.context.get("approval_tool") == "scm.purchase.create"
+    assert state.context.get("approval_args") == {"sku": "X", "tenant_id": "t1"}
+    aid = state.context.get("approval_id")
+    assert aid is not None and aid.startswith("apr-")
+
+
+def test_guarded_executor_no_context_write_on_deny():
+    """Phase 3 #5 联动: deny 时不写 pause 元数据。"""
+    from agent.tools.executor import guarded_executor
+    from agent.runtime.state import AgentState
+    from security.policy import PolicyEngine
+    from security.approval import ApprovalStore
+    state = AgentState(task="t")
+    plan = {"action": "call_tool", "tool": "scm.order.get",
+            "args": {"order_no": "O-1", "tenant_id": "t2"}}
+    out = guarded_executor(plan, state,
+                           user={"tenant_id": "t1", "role": "admin"},
+                           policy=PolicyEngine(),
+                           approvals=ApprovalStore())
+    assert "DENY" in str(out["result"])
+    assert "pause_reason" not in state.context
