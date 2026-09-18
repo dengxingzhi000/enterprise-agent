@@ -5,12 +5,12 @@ import re
 RISKY_CLAUSES = ("无限赔偿", "预付款100%", "口头承诺", "独家买断")
 
 
-def review_contract(contract: dict) -> dict:
+def review_contract(contract: dict, tenant_id: str = "t1") -> dict:
     from knowledge.seed import get_default_store
     amount = contract.get("amount", 0)
     clauses = contract.get("clauses", [])
     supplier_id = contract.get("supplier_id", "")
-    hits = get_default_store().search("合同审批 赔偿 预付款", tenant_id="t1",
+    hits = get_default_store().search("合同审批 赔偿 预付款", tenant_id=tenant_id,
                                       allowed_permissions=["employee", "finance", "manager", "admin"])
     policy_ref = hits[0].text[:80] if hits else "超阈值需审批"
     risky = amount > 10000 or any(any(r in c for r in RISKY_CLAUSES) for c in clauses)
@@ -25,7 +25,7 @@ def review_contract(contract: dict) -> dict:
         try:
             from agent.tools.builtin import build_default_registry
             reg = build_default_registry()
-            sup_out = reg.call("scm.supplier.get", {"supplier_id": supplier_id, "tenant_id": "t1"})
+            sup_out = reg.call("scm.supplier.get", {"supplier_id": supplier_id, "tenant_id": tenant_id})
             supplier_info = str(sup_out)
             trace.append("scm.supplier.get")
         except Exception as e:
