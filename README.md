@@ -1,52 +1,82 @@
 <div align="center">
 
+**English** · [简体中文](./README.zh-CN.md)
+
 # Enterprise AI Operations Agent
 
-### 自研 Agent Runtime —— 覆盖 Tool/MCP、RAG、Memory、Policy/HITL、Workflow、Eval/Observability。
+### A hand-written Agent Runtime — not a LangChain wrapper.
 
-**不是 LangChain 封装，而是一个手写 Planner/Executor 循环的 Runtime，
-每一个阶段都用 TDD 独立推进。**
+**Self-built Planner/Executor loop with Tool/MCP, RAG, Memory, Policy/HITL,
+Workflow, and Eval/Observability. Every stage advanced with TDD.**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/dengxingzhi000/enterprise-agent/ci.yml?branch=main&style=flat-square&logo=github&label=ci)](https://github.com/dengxingzhi000/enterprise-agent/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/dengxingzhi000/enterprise-agent/ci.yml?branch=main&style=flat-square&logo=github&label=ci)](https://github.com/dengxingzhi000/enterprise-agent/actions/workflows/ci.yml)
 [![Stars](https://img.shields.io/github/stars/dengxingzhi000/enterprise-agent?color=ffcb47&labelColor=black&style=flat-square&logo=github)](https://github.com/dengxingzhi000/enterprise-agent/stargazers)
 [![Forks](https://img.shields.io/github/forks/dengxingzhi000/enterprise-agent?color=8ae8ff&labelColor=black&style=flat-square&logo=github)](https://github.com/dengxingzhi000/enterprise-agent/network/members)
-[![Release](https://img.shields.io/github/v/release/dengxingzhi000/enterprise-agent?include_prereleases&labelColor=black&style=flat-square)](https://github.com/dengxingzhi000/enterprise-agent/releases)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue?labelColor=black&style=flat-square&logo=python)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](./LICENSE)
+[![Issues](https://img.shields.io/github/issues/dengxingzhi000/enterprise-agent?color=ff80eb&labelColor=black&style=flat-square&logo=github)](https://github.com/dengxingzhi000/enterprise-agent/issues)
+[![Release](https://img.shields.io/github/v/release/dengxingzhi000/enterprise-agent?include_prereleases&color=ffcb47&labelColor=black&style=flat-square&logo=github)](https://github.com/dengxingzhi000/enterprise-agent/releases)
+[![Python](https://img.shields.io/badge/python-3.12%2B-007396?logo=python&logoColor=white&style=flat-square)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-%3E%3D0.115-009688?logo=fastapi&logoColor=white&style=flat-square)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](#license)
 
-[快速开始](#快速开始) · [能力矩阵](#能力矩阵) · [架构](#架构) · [FAQ](#faq) · [关联项目](#关联项目)
+**[Quick start](#quick-start) · [Capabilities](#capabilities) · [Architecture](#architecture) · [HITL](#human-in-the-loop) · [FAQ](#faq) · [Docs](#documentation)**
 
-<code>pip install -e . &amp;&amp; uvicorn apps.api.main:app --port 8762</code>
+```bash
+pip install -e . && uvicorn apps.api.main:app --port 8762
+```
 
 </div>
 
+> [!IMPORTANT]
+> **The three SCM write tools are placeholders.** `scm.purchase.create`,
+> `scm.order.cancel`, and `scm.stock.adjust` are registered so the planner can
+> name them, but each one returns a fixed `"need approval: … pending human
+> review"` string. **None of them mutate anything.** They are never reached in
+> practice because `guarded_executor` intercepts at
+> `PolicyEngine.need_approval` first; they exist only to defend against a
+> misconfigured policy. Everything else here talks to real HTTP or real local
+> code.
+
 > [!NOTE]
-> **技术路线：自研 Runtime 优先。** `loop` / `state` / `planner` / `executor`
-> 全部手写并以 TDD 推进，后期再用 LangGraph 重构做对照实验。
-> 三个目标场景：**IT 运维 → 合同合规 → 数据分析**，目前 `run_it_ops` 已接通。
+> **Self-built Runtime first, LangGraph later.** `loop` / `state` / `planner` /
+> `executor` are all hand-written and driven by TDD, each layer independently
+> testable. LangGraph rework is planned as a controlled comparison, not a
+> starting dependency. Three target scenarios: **IT operations → contract
+> compliance → data analysis**; `run_it_ops` is wired today.
 
 ---
 
-大模型 Agent 的难点不在于能不能调用工具，而在于多步任务中途失败时能否恢复、
-需要人工审批时能否挂起并恢复、以及每一步决策能否事后追溯。这个项目把这三件事
-做进了 Runtime 本身，而不是留给上层业务代码。
+The hard part of an LLM agent is not calling tools. It is recovering when a
+multi-step task fails halfway, suspending and resuming when a human has to
+approve something, and being able to reconstruct afterwards why each step was
+taken. This project puts those three things in the Runtime itself rather than
+leaving them to the business layer above.
 
-`enterprise-agent` 是一个从零手写的 Agent Runtime：自研 Planner/Executor 循环，
-配套 Tool Registry、MCP/DB/RAG 集成、Policy 与 Human-in-the-Loop 审批、
-Workflow 编排，以及 Eval 与 Trace 可观测性。所有 `SCM_*` 外部依赖都可降级为
-mock，因此**不配置任何密钥也能完整跑通测试与离线链路**。
+`enterprise-agent` is an Agent Runtime written from zero: a hand-built
+Planner/Executor loop, a Tool Registry that admits MCP / DB / RAG tools
+through one interface, Policy with Human-in-the-Loop approval, Workflow
+orchestration, and Eval plus Trace observability.
 
-当前 v0.4.1 聚焦 SCM 集成 v2 与 HITL 闭环，测试覆盖 **128 passed**
-（v0.4.0 基线 99 + v0.4.1 新增 29）。
+Every `SCM_*` external dependency degrades to a mock when unset, so **the full
+test suite and the offline path run with no credentials at all** — not as a
+compromise, but so 128 tests never depend on a service being up.
 
-## 快速开始
+Current v0.4.1 covers SCM integration v2 and the closed HITL loop: **128
+tests passed** (99 at the v0.4.0 baseline, 29 added in v0.4.1).
 
-### 前置依赖
+## Quick start
 
-- **Python 3.12+**
-- **可选**：DeepSeek API Key —— 不配置时走 echo 降级，所有工具使用 mock 实现
+> [!NOTE]
+> **Python 3.12 or newer.** CI runs the matrix on 3.12 and 3.13.
 
-### 安装与运行
+### Prerequisites
+
+| Tool | Version | Required? |
+|---|---|---|
+| **Python** | 3.12+ | yes |
+| **DeepSeek API key** | — | no — the planner falls back to `echo` and every tool returns mock data |
+| **scm-platform** | running | no — without `SCM_GATEWAY_URL` the SCM tools mock themselves |
+
+### Install and run
 
 ```bash
 git clone https://github.com/dengxingzhi000/enterprise-agent.git
@@ -57,134 +87,348 @@ py -m venv .venv
 pip install -e .
 
 copy .env.example .env          # Linux/macOS: cp .env.example .env
-                                  # 填入 DEEPSEEK_API_KEY（可留空走 echo 降级）
+                                  # DEEPSEEK_API_KEY may be left empty
 
 pytest -q                       # 128 passed
 uvicorn apps.api.main:app --port 8762 --reload
 ```
 
-然后打开 <http://localhost:8762/docs>，向 `POST /chat` 发请求。
+Then open <http://localhost:8762/docs> and `POST /chat`.
 
-> [!TIP]
-> **`SCM_*` 环境变量不配置时，所有 `scm.*` 工具走 mock 实现**，离线也能完整跑通。
-> 这不是降级妥协，而是为了让 128 个测试不依赖任何外部服务而刻意设计的。
+### Endpoints
 
-### 环境变量
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness — returns `{"status": "ok", "stage": 1}` |
+| `POST` | `/chat` | Runs one agent task; see the request and response below |
+| `GET` | `/docs` | OpenAPI UI |
 
-| 变量                        | 默认值   | 说明                                                              |
-| --------------------------- | -------- | ----------------------------------------------------------------- |
-| `DEEPSEEK_API_KEY`          | 空       | 模型 Key；留空走 echo 降级                                        |
-| `SCM_*`                     | 未设置   | SCM 集成配置；未设置时工具走 mock                                 |
-| `SCM_RETRY_BACKOFF_SECONDS` | —        | 5xx / ConnectError / Timeout 的自动重试退避间隔                   |
-| `tenant_map`                | 默认回退 | 启动时校验；坏 JSON / 空 dict / 未知 tenant 转 warning 并回退默认 |
+```bash
+curl -X POST http://localhost:8762/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "订单 20260915001 为什么没发货?", "tenant_id": "t1", "user_id": "u1"}'
+```
+
+A completed run returns `reply`, `status`, `task_id`, `trace_id`, and — when the
+agent had tokens — `token_usage` and `cost`. A run that hits an approval gate
+returns `status: "paused"` plus `approval_id`, `approval_tool`, and
+`approval_args`.
+
+### Environment variables
+
+Everything has a working default. `pip install -e .` alone is enough to run
+the tests and the offline path.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | empty | Model key; empty means the `echo` fallback planner |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible endpoint |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | Model id, also the pricing key for cost accounting |
+| `SCM_GATEWAY_URL` | unset | **Unset ⇒ every `scm.*` tool uses its mock.** Set it and they become real REST calls |
+| `SCM_AUTH_URL` | `http://localhost:8106` | scm-platform auth service |
+| `SCM_USERNAME` / `SCM_PASSWORD` | empty | scm-platform credentials |
+| `SCM_TENANT_MAP` | `{"t1":"tenant_001"}` | Maps the agent's `tenant_id` onto SCM's `tenant` param |
+| `SCM_TIMEOUT_SECONDS` | `5` | Per-request timeout |
+| `SCM_RETRY_BACKOFF_SECONDS` | `0.3` | Sleep before the single retry on 5xx / `ConnectError` / `Timeout` |
+| `AGENT_PORT` | `8762` | Port the gateway expects |
+| `POSTGRES_DSN` / `PG_DSN` | unset | Memory store; `PG_DSN` wins if both are set |
+| `PG_OFFLINE` | unset | Force the memory store offline regardless of DSN |
+| `CONTEXT_BUDGET_TOKENS` | `8000` | Assembler enforces total usage ≤ budget |
+| `CONTEXT_RESERVED_TOKENS` | `1000` | Held back for the reply |
+| `CONTEXT_COMPRESS_RATIO` | `0.8` | Compress once usage exceeds this fraction of available |
+| `CONVERSATION_KEEP_RECENT` | `3` | Recent conversation turns kept verbatim |
+| `OBSERVATION_KEEP_RECENT` | `5` | Recent observations kept verbatim |
+| `MODEL_PRICING_INPUT` / `_OUTPUT` | `0.001` / `0.002` | Per-1k-token pricing for `AgentTask.cost` |
+| `AGENT_STATUS_HISTORY` | `50` | Cap on the status-history ring buffer |
+
+> [!WARNING]
+> **`SCM_TENANT_MAP` fails open, not closed.** A malformed JSON, an empty dict,
+> or an unknown tenant produces a warning and falls back to the default tenant
+> rather than raising. That means **tenant isolation degrades silently.** In
+> production, treat that warning as an error.
 
 > [!NOTE]
-> `tenant_map` 的启动校验是 v0.4.1 新增的。配置损坏时不再直接崩溃，而是打
-> warning 并回退到默认 tenant —— 但这意味着**租户隔离会静默降级**，生产环境
-> 应把该 warning 当作错误处理。
+> `langgraph`, `redis`, and `tiktoken` are deliberately **not** hard
+> requirements. `workflow/checkpoint.py` warns and uses an in-memory checkpointer
+> when `langgraph` is absent; token counting falls back to a heuristic without
+> `tiktoken`. Offline CI has to stay green.
 
-## 能力矩阵
+## Capabilities
 
-| 能力         | 提供什么                                            | 关键实现与约束                                        |
-| ------------ | --------------------------------------------------- | ----------------------------------------------------- |
-| Agent 循环   | 自研 Planner/Executor 循环，非框架封装              | `agent/runtime`，每个阶段独立 TDD                     |
-| 工具注册     | Tool Registry 统一调度，MCP / DB / RAG 工具同构接入 | `agent/tools`；写口工具全部注册，避免 `unknown tool`  |
-| 人工审批     | Policy 驱动的 HITL，`/chat` 暴露 `approval_id`      | `Policy.need_approval` 触发 Runtime paused transition |
-| 可观测性     | Tracer 以 contextvar 驱动，记录每次调用与结果       | `scm_call` / `scm_result` 事件，`observability/`      |
-| 上下文与记忆 | 上下文压缩 + 持久化检查点                           | `agent/context`、`agent/memory`                       |
-| 知识检索     | RAG 检索接入                                        | `knowledge/`                                          |
-| 工作流编排   | Workflow 组合多步任务                               | `workflow/`                                           |
-| 评估         | Eval 套件                                           | `evaluation/`                                         |
-| 安全         | 独立安全策略与校验层                                | `security/`                                           |
-| 可靠性       | 5xx / `ConnectError` / `Timeout` 自动重试，退避可配 | `SCM_RETRY_BACKOFF_SECONDS`                           |
+| Icon | Area | What it gives you | Implementation and constraints |
+|---|---|---|---|
+| 🔁 | **Agent loop** | Hand-built Planner/Executor loop, not a framework wrapper | `agent/runtime`, each stage TDD'd independently |
+| 🧰 | **Tool registry** | One dispatch path for MCP / DB / RAG tools | `agent/tools`; every write tool registered so the planner never hits `unknown tool` |
+| 🛡️ | **Policy** | Read ⇒ allow, write ⇒ need approval, unknown ⇒ deny | `integrations/scm/policy_map.py`, default deny |
+| ✋ | **Human-in-the-loop** | Task suspends on approval and resumes by id | `guarded_executor` → `paused` transition → `approval_id` in the response |
+| 📉 | **Observability** | Every tool call and result traced via `contextvar` | `observability/`; `scm_call` / `scm_result` events |
+| 🧠 | **Context & memory** | Budgeted assembly, compression, persistent memory | `agent/context`, `agent/memory`; degrades when PG is down |
+| 📚 | **Retrieval** | RAG over the knowledge base | `knowledge/` |
+| 🔀 | **Workflow** | Multi-step orchestration and checkpoints | `workflow/`, with a durable LangGraph path when installed |
+| 📊 | **Evaluation** | Eval suites | `evaluation/` |
+| 🔒 | **Security** | Separate policy and validation layer | `security/` |
+| 🔁 | **Reliability** | One retry with configurable backoff on 5xx / `ConnectError` / `Timeout` | `SCM_RETRY_BACKOFF_SECONDS` |
+| 💰 | **Cost** | Per-task token usage and cost accumulation | `AgentTask`, priced off `DEEPSEEK_MODEL` |
 
-## 架构
+## Architecture
 
-```text
-用户 → Agent Gateway (FastAPI :8762) → Agent Runtime (Planner/Executor loop)
-  → Tool Registry → MCP/DB/RAG → Policy/HITL → Workflow → Eval/Trace
+```
+   ┌──────────────────────────────────────────────────────────┐
+   │  POST /chat                                              │
+   │  message · tenant_id · user_id · task_id                 │
+   └───────────────────────────┬──────────────────────────────┘
+                               ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │  Tracer.start_trace()      trace_id ── contextvar ──┐    │
+   └───────────────────────────┬─────────────────────────┼───┘
+                               ▼                         │
+   ┌──────────────────────────────────────────────────────────┐
+   │  agent.runtime.loop.run(state, planner, executor)      │◀─┐
+   │                                                          │  │
+   │   ┌───────────────┐   plan.action   ┌──────────────────┐ │  │
+   │   │ ContextAssembler│───────────────▶│     Planner      │ │  │
+   │   │ budget+compress│                │ DeepSeek / echo  │ │  │
+   │   └───────────────┘                 └────────┬─────────┘ │  │
+   │                                             │           │  │
+   │                          ┌──────────────────┴────────┐  │  │
+   │                          │                           │  │  │
+   │                 action=finish                action=call_tool
+   │                          │                           │  │  │
+   │                          ▼                           ▼  │  │
+   │                     status=done        ┌──────────────────┐
+   │                                       │guarded_executor  │──┘
+   │                                       │ Policy.need_approval
+   │                                       └────────┬─────────┘
+   │                          ┌─────────────────────┼─────────────────────┐
+   │                          │ allow               │ need_approval       │ deny
+   │                          ▼                     ▼                     ▼
+   │                   Tool Registry         status=paused          status=failed
+   │                          │             + approval_id
+   │        ┌─────────┬───────┼────────┬────────────┐
+   │        ▼         ▼       ▼        ▼            ▼
+   │   metrics  logs.   git.  db.   knowledge  scm.* (4 read)
+   │   .get     search   diff   query   .search     │
+   │                                                 └── 3 write tools: placeholders
+   └──────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+        workflow/ · evaluation/ · observability/ · infrastructure/pg
 ```
 
-### 项目结构
+Three properties of that diagram are the point of the project:
 
-```text
+**The loop is inspectable.** `run()` in `agent/runtime/loop.py` is 100 lines of
+plain Python with no framework underneath. Every exit path — `finish_received`,
+`executor_error`, `unknown_action`, `need_approval`, `max_iterations` — sets a
+status, records tokens, emits a trace event, and returns. Nothing is hidden in
+a framework callback.
+
+**The HITL gate is a state transition, not an exception.** When
+`guarded_executor` sees a write tool and `PolicyEngine.need_approval` fires, the
+observation carries a `"need approval"` result. The loop recognises that prefix,
+transitions to `paused`, and **breaks cleanly** — the task object stays valid
+and `approval_id` is handed back. Resuming is a normal continuation, not a
+recovery path.
+
+**Mocks are the default, not the fallback.** `register_scm_tools` checks
+`_use_mock()` — which is just "is `SCM_GATEWAY_URL` set". Unset means mock. That
+is what makes 128 offline tests possible and CI hermetic.
+
+### Project structure
+
+```
 enterprise-agent/
-├── agent/              # Runtime 核心
-│   ├── runtime/        # Planner/Executor 循环
-│   ├── tools/          # Tool Registry
-│   ├── context/        # 上下文管理与压缩
-│   └── memory/         # 记忆持久化
-├── apps/               # FastAPI 应用与 API 层
-├── workflow/           # 工作流编排
-├── integrations/       # MCP / SCM 外部集成
-├── knowledge/          # RAG 检索
-├── security/           # 安全策略
-├── evaluation/         # Eval 套件
-├── observability/      # Tracer 与 Trace
-├── infrastructure/     # 基础设施抽象
-├── tests/              # 128 个测试
-└── docs/superpowers/   # specs（设计）+ plans（实施计划）
+├── apps/
+│   └── api/main.py          # FastAPI gateway: /health, /chat
+├── agent/
+│   ├── runtime/             # loop · planner · state · status · agent_task · counter
+│   ├── tools/               # registry · executor (guarded) · builtin
+│   ├── context/             # assembler, budget, compression
+│   └── memory/              # persistent store
+├── integrations/
+│   └── scm/                 # client · auth · tools · policy_map
+├── security/                # PolicyEngine · ApprovalStore
+├── workflow/                # graph · durable · checkpoint · scenarios
+├── knowledge/               # RAG retrieval
+├── evaluation/              # eval suites
+├── observability/           # Tracer and trace store
+├── infrastructure/pg/       # connector, schema
+├── tests/                   # 128 tests
+└── docs/superpowers/        # specs/ (design) + plans/ (TDD plans)
 ```
 
-### 阶段进度
+### Stage progress
 
-每个阶段独立 TDD 推进：
+Each stage was advanced independently under TDD:
 
-脚手架 → Runtime → Tool/MCP → RAG → Memory → Policy/HITL → Workflow → Eval/Obs → LangGraph 重构
+scaffolding → Runtime → Tool/MCP → RAG → Memory → Policy/HITL → Workflow →
+Eval/Observability → LangGraph rework
+
+## Human-in-the-loop
+
+The approval loop is the feature most agent frameworks leave to the caller, so
+it is worth stating exactly what happens.
+
+```
+   POST /chat ──▶ planner wants a write tool
+                     │
+                     ▼
+        PolicyEngine.need_approval(tool, user)
+                     │
+        ┌────────────┴────────────┐
+        │ allow                   │ need_approval
+        ▼                         ▼
+   tool runs              guarded_executor returns
+                           observation "need approval: …"
+                                │
+                                ▼
+                    loop sees the prefix, breaks
+                                │
+                                ▼
+              status=paused, transition recorded,
+              approval_id + approval_tool + approval_args
+                        in the /chat response
+                                │
+                                ▼
+             caller resolves the approval, then
+             resumes with the same task_id
+```
+
+`scm_policy_decision` is the whole policy in five lines: read tools are
+`allow`, write tools are `need_approval`, **anything unregistered is `deny`**.
+The default is closed.
 
 ## FAQ
 
 <details>
-<summary><strong>不配置 DeepSeek API Key 能跑吗？</strong></summary>
+<summary><strong>Will it run without a DeepSeek API key?</strong></summary>
 
-能。模型调用会走 echo 降级，所有 `SCM_*` 工具走 mock 实现。这正是 128 个测试
-不依赖任何外部服务的原因，`pytest -q` 在完全离线的环境下也应全绿。
-
-</details>
-
-<details>
-<summary><strong>为什么不用 LangGraph / LangChain？</strong></summary>
-
-技术路线是自研 Runtime 优先：`loop` / `state` / `planner` / `executor` 手写并以
-TDD 推进，这样每一层的行为都可测试、可解释。后期会用 LangGraph 重构做对照实验，
-而不是一开始就绑定框架。
+Yes. The planner falls back to `echo` and every `SCM_*` tool returns mock data.
+That is exactly why the 128 tests depend on no external service, and `pytest -q`
+should be fully green offline.
 
 </details>
 
 <details>
-<summary><strong>SCM 集成是做什么的？</strong></summary>
+<summary><strong>Why not just use LangGraph or LangChain?</strong></summary>
 
-`SCM_*` 工具用于操作 [scm-platform](https://github.com/dengxingzhi000/scm-platform)：
-订单 5xx 排查（`scm.order.get`）、库存调整（`scm.stock.adjust`）、订单取消
-（`scm.order.cancel`）、供应商风险查询（`scm.supplier.get`）与合同评审钩子
-（`review_contract`）。所有写口工具都已注册，配了审批策略后不会再触发
-`unknown tool`。
+The route is self-built Runtime first. `loop` / `state` / `planner` /
+`executor` are hand-written under TDD so each layer's behaviour is testable
+and explainable on its own. LangGraph is planned as a rework for a controlled
+comparison rather than a dependency taken on at the start — which is why
+`workflow/graph_lang.py` and `workflow/durable.py` exist alongside the
+hand-rolled path, and why `langgraph` stays an optional dependency.
 
 </details>
 
 <details>
-<summary><strong>HITL 审批流程怎么走通？</strong></summary>
+<summary><strong>What does the SCM integration actually do?</strong></summary>
 
-Policy 的 `need_approval` 触发后，Runtime 进入 paused transition，并在
-`/chat` 响应里暴露 `approval_id`。调用方凭该 ID 推进审批，Runtime 再恢复执行。
+Four read tools talk to [scm-platform](https://github.com/dengxingzhi000/scm-platform)
+over REST, with tenant mapping and one retry on 5xx / `ConnectError` /
+`Timeout`:
+
+| Tool | Calls | Purpose |
+|---|---|---|
+| `scm.order.get` | `GET /api/orders/{order_no}` | Order 5xx triage |
+| `scm.inventory.query` | `GET /api/inventory` | Stock lookup |
+| `scm.sales.report` | `GET /api/analytics/sales` | Sales aggregation |
+| `scm.supplier.get` | `GET /api/suppliers/{id}` | Supplier risk |
+
+The three write tools — `scm.purchase.create`, `scm.order.cancel`,
+`scm.stock.adjust` — are **placeholders**, as flagged at the top of this file.
+Registering them is deliberate: without them the planner can emit a tool name
+the registry has never heard of and the executor raises `unknown tool` before
+the policy layer ever gets to approve it.
 
 </details>
 
-## 文档
+<details>
+<summary><strong>Is HITL actually wired end to end?</strong></summary>
 
-- `docs/superpowers/specs/` — 设计文档（每个特性一份）
-- `docs/superpowers/plans/` — 实施计划（每阶段一份，TDD checkbox 形式）
-- [SECURITY.md](./SECURITY.md) — 安全模型与漏洞报告通道
+The suspend-and-resume path is: `/chat` returns `status: "paused"` with an
+`approval_id`, and the trace records the transition. `workflow/durable.py` and
+`tests/test_durable_langgraph.py` cover the durable checkpoint path.
 
-## 关联项目
+What is **not** implemented is a resume endpoint. `apps/api/main.py` accepts a
+`task_id` on the request, but there is no `/approvals/{id}` route that resolves
+an approval and drives the task to completion. Today a paused task is a
+suspended object, not a round trip.
 
-- **[scm-platform](https://github.com/dengxingzhi000/scm-platform)** — Java 微服务供应链业务平台（Spring Boot 4 + Spring Cloud 2025），本 Agent 的运维/分析操作对象：订单 5xx 排查、报销合规审查、销售数据分析均以它为目标系统。
+</details>
 
-## 贡献指南
+<details>
+<summary><strong>How does context get kept inside a token budget?</strong></summary>
 
-欢迎贡献！提交 PR 前请先阅读 [SECURITY.md](./SECURITY.md) 中的安全模型，
-并遵循[约定式提交](https://www.conventionalcommits.org/zh-hans/)。
-本项目采用 Apache License 2.0，详见 [LICENSE](./LICENSE)。
+`ContextAssembler` enforces `CONTEXT_BUDGET_TOKENS` minus
+`CONTEXT_RESERVED_TOKENS`. Past `CONTEXT_COMPRESS_RATIO` of the available
+budget it triggers compression, keeping the most recent
+`CONVERSATION_KEEP_RECENT` turns and `OBSERVATION_KEEP_RECENT` observations
+verbatim and summarising the rest. The resulting report is stored on
+`context_report` and emitted as a `context_assemble` trace event, so you can see
+what the model was actually given.
+
+Token counting needs `tiktoken`; without it the runtime falls back to a
+heuristic estimate rather than failing.
+
+</details>
+
+<details>
+<summary><strong>What happens when PostgreSQL is down?</strong></summary>
+
+The memory store degrades silently and warns — `tests/test_memory_pg.py`
+covers this explicitly (`test_memory_store_outage_degrades_silently`). An
+unavailable memory layer should not take down an agent task.
+
+Set `PG_OFFLINE=1` to skip it deliberately. Be aware that "silently" is doing
+real work in that sentence: a persistent-memory outage looks like a working
+agent that has forgotten everything.
+
+</details>
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [Design specs](./docs/superpowers/specs/) | One design document per feature |
+| [Implementation plans](./docs/superpowers/plans/) | One TDD plan per stage, checkbox form |
+| [Security model](./SECURITY.md) | Threat model and the private reporting channel |
+| [Changelog](./CHANGELOG.md) | What changed in each release |
+| [Contributing](./CONTRIBUTING.md) | Branch conventions and what CI checks |
+
+Security reports go through [SECURITY.md](./SECURITY.md) — not the issue
+tracker.
+
+## Star history
+
+<a href="https://www.star-history.com/?repos=dengxingzhi000%2Fenterprise-agent&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dengxingzhi000/enterprise-agent&amp;type=date&amp;theme=dark&amp;legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dengxingzhi000/enterprise-agent&amp;type=date" />
+    <img alt="Enterprise AI Operations Agent GitHub star history" src="https://api.star-history.com/chart?repos=dengxingzhi000/enterprise-agent&amp;type=date" />
+  </picture>
+</a>
+
+## Related projects
+
+- **[scm-platform](https://github.com/dengxingzhi000/scm-platform)** — the Java microservices supply-chain platform (Spring Boot 4 + Spring Cloud 2025) this agent operates on: order 5xx triage, expense-compliance review, and sales analysis all target it.
+
+## Contributing
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) first — it covers the branch
+conventions and exactly what CI checks.
+
+1. Fork the repository
+2. Create a branch (`git checkout -b feat/…`)
+3. `pytest -q` before pushing — CI runs it on Python 3.12 and 3.13
+4. Open a pull request using the template
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+Participation is governed by the [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+## License
+
+[Apache License 2.0](./LICENSE)
 
 ---
 
